@@ -99,29 +99,25 @@ SUPER_ADMIN_PASSWORD = "Myfittech1!!!!"
 
 # Initialize session state variables
 if "google_credentials" not in st.session_state:
-    st.session_state.google_credentials = None  # Default to None
+    st.session_state.google_credentials = None
 if "is_super_admin" not in st.session_state:
     st.session_state.is_super_admin = False
 if "connected_accounts" not in st.session_state:
     st.session_state.connected_accounts = {}
 if "organisations" not in st.session_state:
     st.session_state.organisations = {}
-if "error_logs" not in st.session_state:
-    st.session_state.error_logs = []
+if "invitations" not in st.session_state:
+    st.session_state.invitations = {}
 if "user_activities" not in st.session_state:
     st.session_state.user_activities = []
 if "selected_account" not in st.session_state:
     st.session_state.selected_account = None
 if "organisation_id" not in st.session_state:
     st.session_state.organisation_id = None
-if "user_organisation_limits" not in st.session_state:
-    st.session_state.user_organisation_limits = {}
 if "bank_data" not in st.session_state:
     st.session_state.bank_data = {}
 if "page" not in st.session_state:
-    st.session_state.page = "login"  # Default to login page
-if "invitations" not in st.session_state:
-    st.session_state.invitations = {}
+    st.session_state.page = "login"
 
 
 def get_user_info(creds):
@@ -222,22 +218,23 @@ def handle_organisation_creation():
     return True
 
 def create_organisation():
-    organisation_name = st.text_input("Organisation Name", value="")
-    organisation_description = st.text_area("Organisation Description", value="")
-    if st.button("Create Organisation"):
-        if handle_organisation_creation():
-            org_id = str(uuid.uuid4())
-            user_email = st.session_state.connected_accounts.get(st.session_state.selected_account, {}).get("email", "")
-            st.session_state.organisations[org_id] = {
-                "name": organisation_name,
-                "description": organisation_description,
-                "users": [user_email],
-                "email_accounts_with_data": 0,
-                "bank_accounts_uploaded": 0,
-                "namespace": org_id
-            }
-            log_activity(user_email, "Created organisation", {"organisation_id": org_id, "name": organisation_name})
-            st.success(f"Organisation '{organisation_name}' created successfully.")
+    st.title("Create Organization")
+    org_name = st.text_input("Organization Name")
+    org_description = st.text_area("Organization Description")
+    
+    if st.button("Create Organization"):
+        org_id = str(uuid.uuid4())
+        user_email = st.session_state.google_credentials and get_user_info(st.session_state.google_credentials)
+        st.session_state.organisations[org_id] = {
+            "name": org_name,
+            "description": org_description,
+            "users": [user_email],
+            "namespace": org_id,
+            "email_accounts_with_data": 0,
+            "bank_accounts_uploaded": 0
+        }
+        st.success(f"Organization '{org_name}' created successfully!")
+
 
 # Super Admin Dashboard
 if st.session_state.is_super_admin:
@@ -252,10 +249,12 @@ if st.session_state.is_super_admin:
 
 # Additional code to process bank statements and correlate subscriptions from email and bank data
 # Process Bank Statements
-def upload_and_process_bank_statement(file, organisation_id):
-    try:
-        # Read CSV and parse relevant data
-        df = pd.read_csv(file)
+def upload_and_process_bank_statement(org_id):
+    st.title("Upload Bank Statement")
+    uploaded_file = st.file_uploader("Upload CSV file for bank accounts", type="csv")
+
+    if uploaded_file:
+        df = pd.read_csv(uploaded_file)
         subscriptions = []
         for _, row in df.iterrows():
             description = row.get("Description", "")
@@ -268,14 +267,9 @@ def upload_and_process_bank_statement(file, organisation_id):
                     "date": date,
                     "confidence": 0.85
                 })
-        # Store parsed subscriptions in Pinecone
-        upsert_data_to_pinecone(subscriptions, organisation_id, "bank_data")
-        log_activity(st.session_state.selected_account, "Uploaded and processed bank statement", {"rows": len(df)})
-        st.success(f"Successfully processed {len(subscriptions)} subscriptions from the uploaded bank statement.")
-        return subscriptions
-    except Exception as e:
-        log_error(f"Error processing bank statement: {e}")
-        st.error("There was an error processing the bank statement. Please try again.")
+        st.session_state.bank_data[org_id] = subscriptions
+        st.success(f"Processed {len(subscriptions)} subscriptions from the uploaded file!")
+
 
 # Upsert Data to Pinecone
 def upsert_data_to_pinecone(data, organisation_id, source_type):
@@ -337,66 +331,56 @@ def correlate_email_and_bank_data(email_data, bank_data):
 
 def super_user_login():
     st.title("Super User Login")
-    
-    # Input fields for email and password
     email = st.text_input("Enter your email")
-    password = st.text_input("Enter your password", type="password")
-    
-    # Secure credentials (hashed password for example purposes)
+    password = st.text_input("Enter your password", type="password", help="Super admin credentials")
+
+    # Hardcoded super admin credentials (replace with secure method)
     super_user_credentials = {
         "admin@example.com": hashlib.sha256("superpassword".encode()).hexdigest()
     }
 
-    if st.button("Login"):
+    if st.button("Login as Super Admin"):
         if email in super_user_credentials:
             hashed_password = hashlib.sha256(password.encode()).hexdigest()
             if super_user_credentials[email] == hashed_password:
                 st.session_state.is_super_admin = True
+                st.session_state.page = "super_admin_dashboard"
                 st.success("Logged in as Super Admin!")
-                # Add a trigger for UI refresh
-                st.session_state.page = "super_admin_dashboard"  # Switch to dashboard
             else:
-                st.error("Invalid password for Super User!")
+                st.error("Invalid password!")
         else:
-            st.error("Invalid email for Super User!")
+            st.error("Invalid email for Super Admin!")
 
 
-def generate_invitation_link():
-    if not st.session_state.is_super_admin:
-        st.error("Only super admins can generate invitations!")
-        return
+def generate_invitation_link(org_id):
+    invite_token = str(uuid.uuid4())
+    base_url = "https://kodosh.streamlit.app"
+    invite_link = f"{base_url}/invite?org_id={org_id}&token={invite_token}"
 
-    st.title("Generate Invitation Link")
-    organization_id = st.selectbox("Select Organization", list(st.session_state.organisations.keys()))
-    if st.button("Generate Link"):
-        invite_token = str(uuid.uuid4())
-        base_url = "https://kodosh.streamlit.app"
-        invite_link = f"{base_url}/invite?org_id={organization_id}&token={invite_token}"
-        
-        # Save the invite token and organization mapping
-        if "invitations" not in st.session_state:
-            st.session_state.invitations = {}
-        st.session_state.invitations[invite_token] = organization_id
-        
-        st.success(f"Invitation Link: {invite_link}")
-
+    if "invitations" not in st.session_state:
+        st.session_state.invitations = {}
+    st.session_state.invitations[invite_token] = org_id
+    return invite_link
 
 def handle_invitation():
     query_params = st.experimental_get_query_params()
     org_id = query_params.get("org_id", [None])[0]
     token = query_params.get("token", [None])[0]
-    
+
     if org_id and token and token in st.session_state.invitations:
         email = st.text_input("Enter your email to join the organization")
-        if st.button("Join"):
+        if st.button("Join Organization"):
             if org_id in st.session_state.organisations:
                 st.session_state.organisations[org_id]["users"].append(email)
-                del st.session_state.invitations[token]  # Remove used token
-                st.success(f"Successfully joined organization {org_id}!")
+                del st.session_state.invitations[token]  # Remove token
+                st.success(f"You have joined the organization {org_id}!")
             else:
                 st.error("Invalid organization ID!")
     else:
-        st.warning("Invalid or expired invitation link!")
+        st.warning("Invalid or expired invitation link.")
+
+
+
 
 def google_login():
     st.title("Connect to Google for Email Processing")
@@ -586,32 +570,17 @@ def view_user_activities():
     else:
         st.write("No user activities logged yet.")
 
-# Initialise Application
 def main():
-    # Initialize session state variables
-    if "page" not in st.session_state:
-        st.session_state.page = "login"  # Default to login page
-    if "is_super_admin" not in st.session_state:
-        st.session_state.is_super_admin = False
-
+    # Navigation
     if st.session_state.page == "login":
-        login_option = st.sidebar.radio("Choose Login Type", ["User Login", "Super Admin Login"])
-        
-        if login_option == "Super Admin Login":
-            super_user_login()
-        elif login_option == "User Login":
-            google_login()
-
+        st.sidebar.radio("Login", ["User Login", "Super Admin Login"], on_change=lambda: super_user_login() if st.sidebar.radio_value == "Super Admin Login" else google_login())
     elif st.session_state.page == "super_admin_dashboard" and st.session_state.is_super_admin:
-        st.sidebar.title("Super Admin Controls")
-        if st.sidebar.button("View Organizations"):
-            super_admin_organisation_management()
-        if st.sidebar.button("Generate Invitations"):
-            generate_invitation_link()
-        if st.sidebar.button("Logout"):
-            st.session_state.is_super_admin = False
-            st.session_state.page = "login"  # Return to login page
-            st.success("Logged out successfully!")
+        st.sidebar.button("Invite Users", on_click=lambda: generate_invitation_link())
+        st.sidebar.button("Create Organization", on_click=create_organisation)
+    elif st.session_state.page == "user_dashboard":
+        create_organisation()
+        upload_and_process_bank_statement(st.session_state.organisation_id)
+
 
 
 
