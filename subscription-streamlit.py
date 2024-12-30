@@ -41,14 +41,10 @@ CLIENT_CONFIG = {
 
 
 
-
 def authorize_gmail_api():
     """
-    Handles Google OAuth process with a specified redirect_uri.
+    Handles Google OAuth via manual flow for headless environments.
     """
-    from google_auth_oauthlib.flow import InstalledAppFlow
-    from google.oauth2.credentials import Credentials
-
     SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
 
     # Get client configuration from secrets
@@ -62,25 +58,25 @@ def authorize_gmail_api():
         }
     }
 
-    creds = None
-
-    if os.path.exists("token.json"):
-        creds = Credentials.from_authorized_user_file("token.json", SCOPES)
-        if creds and creds.valid:
-            return creds
-
-    # Initialize OAuth flow
     flow = InstalledAppFlow.from_client_config(client_config, SCOPES)
-    flow.redirect_uri = st.secrets["GMAIL_API_CREDENTIALS"]["REDIRECT_URI"]
+    auth_url, _ = flow.authorization_url(prompt="consent")
 
-    # Use console or local server flow
-    creds = flow.run_local_server(port=0)
+    st.write("### Google Login")
+    st.markdown(f"[Click here to authorize]({auth_url})", unsafe_allow_html=True)
 
-    # Save credentials for reuse
-    with open("token.json", "w") as token_file:
-        token_file.write(creds.to_json())
+    # Prompt user for the authorization code
+    auth_code = st.text_input("Enter the authorization code here:")
+    if auth_code:
+        try:
+            flow.fetch_token(code=auth_code)
+            creds = flow.credentials
+            st.session_state.google_credentials = creds
+            st.success("Authorization successful!")
+            return creds
+        except Exception as e:
+            st.error(f"Failed to fetch token: {e}")
+            return None
 
-    return creds
 
 
 
@@ -250,27 +246,71 @@ if st.session_state.is_super_admin:
 
 # Additional code to process bank statements and correlate subscriptions from email and bank data
 # Process Bank Statements
+
+
+
+
 def upload_and_process_bank_statement(org_id):
     """
-    Uploads and processes a CSV file for bank account data.
+    Upload and process a CSV file for bank account data.
+    Identifies potential subscriptions based on repeated monthly charges.
     """
+    st.title("Upload Bank Statement")
+
     uploaded_file = st.file_uploader("Upload CSV File", type=["csv"])
+
     if uploaded_file:
-        df = pd.read_csv(uploaded_file)
-        subscriptions = []
-        for _, row in df.iterrows():
-            description = row.get("Description", "")
-            amount = row.get("Amount", 0)
-            date = row.get("Date", "")
-            if "subscription" in description.lower() or "recurring" in description.lower():
-                subscriptions.append({
-                    "service": description,
-                    "amount": amount,
-                    "date": date,
-                    "confidence": 0.85,
-                })
-        st.session_state.bank_data[org_id] = subscriptions
-        st.success(f"Processed {len(subscriptions)} subscriptions!")
+        try:
+            # Load the CSV file into a DataFrame
+            df = pd.read_csv(uploaded_file)
+
+            # Validate required columns
+            required_columns = ["Description", "Amount", "Date"]
+            missing_columns = [col for col in required_columns if col not in df.columns]
+            if missing_columns:
+                st.error(f"Missing required columns: {', '.join(missing_columns)}")
+                return
+
+            # Convert Date column to datetime
+            df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
+            if df["Date"].isna().any():
+                st.error("Invalid date format detected. Please ensure all dates are valid.")
+                return
+
+            # Extract month and year from the Date column
+            df["Month"] = df["Date"].dt.to_period("M")
+
+            # Group by merchant and amount, check for repeated charges across months
+            subscriptions = []
+            grouped = df.groupby(["Description", "Amount"])
+            for (description, amount), group in grouped:
+                unique_months = group["Month"].nunique()
+                if unique_months > 2:  # Subscription-like pattern: appears in at least 3 months
+                    subscriptions.append({
+                        "Merchant": description,
+                        "Amount": amount,
+                        "Occurrences": unique_months,
+                        "First Charge": group["Date"].min().strftime("%Y-%m-%d"),
+                        "Last Charge": group["Date"].max().strftime("%Y-%m-%d")
+                    })
+
+            # Save processed subscriptions to session state
+            if org_id not in st.session_state.bank_data:
+                st.session_state.bank_data[org_id] = []
+            st.session_state.bank_data[org_id].extend(subscriptions)
+
+            # Display results
+            st.success(f"Identified {len(subscriptions)} potential subscriptions!")
+            if subscriptions:
+                st.write("### Identified Subscriptions")
+                st.dataframe(pd.DataFrame(subscriptions))
+
+        except Exception as e:
+            st.error(f"An error occurred while processing the file: {e}")
+    else:
+        st.info("Please upload a CSV file to process.")
+
+
 
 
 
@@ -596,13 +636,13 @@ def delete_organization(org_id):
 
 def super_admin_dashboard():
     """
-    Super Admin Dashboard with functionalities to create organizations, invite users,
-    connect Gmail accounts, and upload bank data.
+    Super Admin Dashboard with functionalities to create organizations,
+    invite users, connect Gmail accounts, and upload/view bank data.
     """
     st.title("Super Admin Dashboard")
 
     # Tabs for different functionalities
-    tabs = st.tabs(["Organizations", "User Management", "Email Processing", "Bank Data Upload"])
+    tabs = st.tabs(["Manage Organizations", "Invite Users", "Upload Bank Data", "View Subscriptions"])
 
     # Tab 1: Manage Organizations
     with tabs[0]:
@@ -612,32 +652,43 @@ def super_admin_dashboard():
         if st.button("Create Organization"):
             create_organization(org_name, org_description)
 
-        st.write("### Existing Organizations")
-        for org_id, org_data in st.session_state.organisations.items():
-            st.write(f"**{org_data['name']}** - {org_data['description']}")
-            if st.button(f"Delete {org_data['name']}", key=org_id):
-                delete_organization(org_id)
-
-    # Tab 2: Manage Users
+    # Tab 2: Invite Users
     with tabs[1]:
-        st.header("Invite Users to Organization")
+        st.header("Invite Users")
         org_id = st.selectbox("Select Organization", list(st.session_state.organisations.keys()))
         if org_id:
             if st.button("Generate Invite Link"):
                 invite_link = generate_invitation_link(org_id)
                 st.success(f"Invite link: {invite_link}")
 
-    # Tab 3: Connect Gmail Accounts
+    # Tab 3: Upload Bank Data
     with tabs[2]:
-        st.header("Connect Gmail Account for Email Processing")
-        google_login()
-
-    # Tab 4: Upload Bank Data
-    with tabs[3]:
         st.header("Upload Bank Statement")
         org_id = st.selectbox("Select Organization for Upload", list(st.session_state.organisations.keys()))
         if org_id:
             upload_and_process_bank_statement(org_id)
+
+    # Tab 4: View Subscriptions
+    with tabs[3]:
+        st.header("View Subscriptions")
+        org_id = st.selectbox("Select Organization to View Subscriptions", list(st.session_state.organisations.keys()))
+        if org_id:
+            view_identified_subscriptions(org_id)
+
+def view_identified_subscriptions(org_id):
+    """
+    Display identified subscriptions for a specific organization.
+    """
+    st.title("Identified Subscriptions")
+
+    if org_id not in st.session_state.bank_data or not st.session_state.bank_data[org_id]:
+        st.info("No subscriptions identified yet. Please upload and process bank statements.")
+        return
+
+    subscriptions = st.session_state.bank_data[org_id]
+    st.write(f"### Subscriptions for Organization ID: {org_id}")
+    df = pd.DataFrame(subscriptions)
+    st.dataframe(df)
 
 
 def main():
