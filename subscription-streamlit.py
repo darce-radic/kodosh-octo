@@ -443,15 +443,13 @@ def generate_invitation_link(org_id):
     return invite_link
 
 
-
-
 def google_login():
     """
-    Handles Google OAuth for Gmail access.
+    Handles Google OAuth for Gmail access, using the correct redirect_uri.
     """
     SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
 
-    # Client secrets from `st.secrets`
+    # OAuth client configuration from Streamlit secrets
     client_config = {
         "web": {
             "client_id": st.secrets["GMAIL_API_CREDENTIALS"]["CLIENT_ID"],
@@ -470,14 +468,14 @@ def google_login():
     st.write("### Connect Gmail")
     st.markdown(f"[Click here to authorize Gmail access]({auth_url})", unsafe_allow_html=True)
 
-    # Handle callback
-    query_params = st.query_params
+    # Handle the OAuth callback
+    query_params = st.query_params  # Fetch query parameters from the URL
     auth_code = query_params.get("code", [None])[0]
     if auth_code:
         try:
             flow.fetch_token(code=auth_code)
             creds = flow.credentials
-            st.session_state.google_credentials = creds
+            st.session_state.google_credentials = creds  # Store credentials in session state
             st.success("Gmail account connected successfully!")
         except Exception as e:
             st.error(f"Failed to connect Gmail: {e}")
