@@ -25,16 +25,16 @@ load_dotenv()
 SCOPES = ["https://www.googleapis.com/auth/gmail.readonly", "https://www.googleapis.com/auth/userinfo.email", "openid"]
 CLIENT_ID = st.secrets["GMAIL_API_CREDENTIALS"]["CLIENT_ID"]
 CLIENT_SECRET = st.secrets["GMAIL_API_CREDENTIALS"]["CLIENT_SECRET"]
-MAIN_REDIRECT_URI = "https://kodosh.streamlit.app"
 
+SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
+MAIN_REDIRECT_URI = "https://kodosh.streamlit.app/api/auth/google/callback"
 CLIENT_CONFIG = {
     "web": {
-        "client_id": CLIENT_ID,
-        "client_secret": CLIENT_SECRET,
+        "client_id": st.secrets["GMAIL_API_CREDENTIALS"]["CLIENT_ID"],
+        "client_secret": st.secrets["GMAIL_API_CREDENTIALS"]["CLIENT_SECRET"],
         "auth_uri": "https://accounts.google.com/o/oauth2/auth",
         "token_uri": "https://oauth2.googleapis.com/token",
-        "redirect_uris": [MAIN_REDIRECT_URI],
-        "javascript_origins": ["https://kodosh.streamlit.app"]
+        "redirect_uris": "https://kodosh.streamlit.app/api/auth/google/callback"
     }
 }
 
@@ -74,39 +74,84 @@ def detect_subscriptions(df, date_format="%d/%m/%Y"):
 
 def authorize_gmail_api():
     """
-    Handles Google OAuth via manual flow for headless environments.
+    Handles Gmail API authorization for the user and saves credentials.
     """
-    SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
-
-    # Get client configuration from secrets
-    client_config = {
-        "web": {
-            "client_id": st.secrets["GMAIL_API_CREDENTIALS"]["CLIENT_ID"],
-            "client_secret": st.secrets["GMAIL_API_CREDENTIALS"]["CLIENT_SECRET"],
-            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-            "token_uri": "https://oauth2.googleapis.com/token",
-            "redirect_uris": [st.secrets["GMAIL_API_CREDENTIALS"]["REDIRECT_URI"]],
-        }
-    }
-
-    flow = InstalledAppFlow.from_client_config(client_config, SCOPES)
-    auth_url, _ = flow.authorization_url(prompt="consent")
-
-    st.write("### Google Login")
-    st.markdown(f"[Click here to authorize]({auth_url})", unsafe_allow_html=True)
-
-    # Prompt user for the authorization code
-    auth_code = st.text_input("Enter the authorization code here:")
-    if auth_code:
-        try:
-            flow.fetch_token(code=auth_code)
-            creds = flow.credentials
-            st.session_state.google_credentials = creds
-            st.success("Authorization successful!")
+    creds = None
+    if os.path.exists("token.json"):
+        creds = Credentials.from_authorized_user_file("token.json", SCOPES)
+        if creds and creds.valid:
+            st.info("Already logged in")
             return creds
-        except Exception as e:
-            st.error(f"Failed to fetch token: {e}")
-            return None
+
+    # If no valid credentials, initiate the OAuth flow
+    if not creds or not creds.valid:
+        if creds and creds.expired and creds.refresh_token:
+            creds.refresh(Request())
+            st.success("Token refreshed successfully!")
+        else:
+            flow = InstalledAppFlow.from_client_config(
+                CLIENT_CONFIG, SCOPES
+            )
+            flow.redirect_uri = MAIN_REDIRECT_URI
+
+            authorization_url, _ = flow.authorization_url(
+                access_type="offline",
+                include_granted_scopes="true",
+                prompt="consent"
+            )
+
+            # Display custom authorization button
+            st.markdown(
+                f"""
+                <style>
+                .custom-button {{
+                    display: inline-block;
+                    background-color: #4CAF50; /* Green background */
+                    color: white !important;  /* White text */
+                    padding: 10px 24px;
+                    text-align: center;
+                    text-decoration: none;
+                    font-size: 16px;
+                    border-radius: 5px;
+                    margin-top: 5px; /* Reduce space above the button */
+                    margin-bottom: 5px; /* Reduce space below the button */
+                }}
+                .custom-button:hover {{
+                    background-color: #45a049;
+                }}
+                </style>
+                <a href="{authorization_url}" target="_blank" class="custom-button">Authorize with Google</a>
+                """,
+                unsafe_allow_html=True
+            )
+
+def fetch_credentials():
+    """
+    Fetches credentials using the authorization code from the query parameters.
+    """
+    auth_code = st.query_params.get('code', None)
+    if auth_code:
+        logger.info("Fetching credentials with authorization code.")
+        flow = InstalledAppFlow.from_client_config(
+            CLIENT_CONFIG, SCOPES
+        )
+        flow.redirect_uri = MAIN_REDIRECT_URI
+        flow.fetch_token(code=auth_code)
+        creds = flow.credentials
+
+        # Save credentials to session state and token.json
+        st.session_state.creds = creds
+        with open('token.json', 'w') as token_file:
+            token_file.write(creds.to_json())
+
+        # Get user email
+        user_email = get_user_info(creds)
+        st.session_state.user_email = user_email
+        st.experimental_set_query_params()  # Clear query parameters
+        st.success(f"Logged in as {user_email}")
+        st.experimental_rerun()
+    else:
+        st.error("Authorization code not found in query parameters.")
 
 
 
@@ -147,17 +192,19 @@ if "page" not in st.session_state:
     st.session_state.page = "login"
 
 
+
 def get_user_info(creds):
     """
-    Fetch user information using Google OAuth credentials.
+    Fetches the user's profile information using the Gmail API.
     """
     try:
-        service = build('oauth2', 'v2', credentials=creds)
+        service = build("oauth2", "v2", credentials=creds)
         user_info = service.userinfo().get().execute()
-        return user_info.get("email")
+        return user_info.get("email", "Unknown User")
     except Exception as e:
-        st.error("Failed to fetch user info. Please try logging in again.")
+        st.error(f"Failed to fetch user information: {e}")
         return None
+
 
 # Error logging
 def log_error(error_message):
@@ -762,22 +809,47 @@ def view_identified_subscriptions(org_id):
 
 
 def main():
+    """
+    Main function for the application, including user login, Super Admin login,
+    and post-login functionalities.
+    """
     if "page" not in st.session_state:
         st.session_state.page = "login"
 
+    if "creds" not in st.session_state:
+        st.session_state.creds = None
+        st.session_state.user_email = None
+
     if st.session_state.page == "login":
+        st.title("Login to the Application")
         login_option = st.radio("Login as", ["User", "Super Admin"])
         
         if login_option == "User":
-            google_login()
+            if not st.session_state.creds:
+                st.write("### Google Login")
+                authorize_gmail_api()  # Generate authorization link
+                fetch_credentials()   # Handle callback
+            else:
+                st.success(f"Welcome back, {st.session_state.user_email}!")
+                # Navigate to the user dashboard or other user-specific pages
+                st.session_state.page = "user_dashboard"
+                st.experimental_rerun()
         elif login_option == "Super Admin":
-            super_admin_login()
+            super_admin_login()  # Existing Super Admin login functionality
 
     elif st.session_state.page == "super_admin_dashboard" and st.session_state.is_super_admin:
-        super_admin_dashboard()
+        super_admin_dashboard()  # Existing Super Admin dashboard functionality
+
+    elif st.session_state.page == "user_dashboard":
+        st.title("User Dashboard")
+        st.write(f"Welcome, {st.session_state.user_email}!")
+        st.write("This is your user dashboard.")
+        # Add any user-specific functionalities here
+
     else:
         st.title("Welcome to the App")
         st.write("Please log in to access the application.")
+
 
 
 
