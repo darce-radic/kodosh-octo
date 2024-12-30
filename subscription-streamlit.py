@@ -44,27 +44,39 @@ CLIENT_CONFIG = {
 
 def authorize_gmail_api():
     """
-    Handles the Google OAuth process for Gmail access.
+    Handles the Google OAuth process for Gmail access using client secrets from `st.secrets`.
     """
-    creds = None
-    # Define the Google OAuth scope
+
     SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
 
-    # Check if token.json exists
+    # Extract client secrets from `st.secrets`
+    client_secrets = {
+        "web": {
+            "client_id": st.secrets["GMAIL_API_CREDENTIALS"]["CLIENT_ID"],
+            "client_secret": st.secrets["GMAIL_API_CREDENTIALS"]["CLIENT_SECRET"],
+            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+            "token_uri": "https://oauth2.googleapis.com/token",
+            "redirect_uris": [st.secrets["GMAIL_API_CREDENTIALS"]["REDIRECT_URI"]]
+        }
+    }
+
+    creds = None
+    # Check for existing credentials
     if os.path.exists("token.json"):
         creds = Credentials.from_authorized_user_file("token.json", SCOPES)
         if creds and creds.valid:
             return creds
 
-    # No valid credentials, initiate the OAuth flow
-    flow = InstalledAppFlow.from_client_secrets_file("client_secret.json", SCOPES)
+    # No valid credentials, initiate OAuth flow
+    flow = InstalledAppFlow.from_client_config(client_secrets, SCOPES)
     creds = flow.run_local_server(port=0)
-    if creds:
-        # Save credentials to token.json
-        with open("token.json", "w") as token_file:
-            token_file.write(creds.to_json())
-        return creds
-    return None
+
+    # Save the credentials for future use
+    with open("token.json", "w") as token_file:
+        token_file.write(creds.to_json())
+
+    return creds
+
 
 # Initialize Pinecone
 PINECONE_API_KEY = st.secrets["PINECONE_API_KEY"]
@@ -369,18 +381,22 @@ def handle_invitation():
 
 def google_login():
     st.title("Login with Google")
+    
     if st.session_state.google_credentials:
         email = get_user_info(st.session_state.google_credentials)
-        if email:
-            st.success(f"Connected as {email}")
+        st.success(f"Connected as {email}")
     else:
-        creds = authorize_gmail_api()
-        if creds:
-            st.session_state.google_credentials = creds
-            email = get_user_info(creds)
-            st.success(f"Successfully connected to Google as {email}")
-        else:
-            st.error("Google login failed. Please try again.")
+        try:
+            creds = authorize_gmail_api()
+            if creds:
+                st.session_state.google_credentials = creds
+                email = get_user_info(creds)
+                st.success(f"Successfully connected to Google as {email}")
+            else:
+                st.error("Google login failed. Please try again.")
+        except Exception as e:
+            st.error(f"An error occurred during Google login: {str(e)}")
+
 
 
 
