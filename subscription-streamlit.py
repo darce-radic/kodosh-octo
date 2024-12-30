@@ -335,21 +335,19 @@ def super_user_login():
     email = st.text_input("Enter your email")
     password = st.text_input("Enter your password", type="password")
     
-    # Securely store super admin credentials (replace with a secure method)
-    # Use hashed passwords to compare
+    # Secure credentials (hashed password for example purposes)
     super_user_credentials = {
-        "darko.radiceski@gmail.com": hashlib.sha256("Myfittech1!!!!".encode()).hexdigest()
+        "admin@example.com": hashlib.sha256("superpassword".encode()).hexdigest()
     }
 
     if st.button("Login"):
-        # Check if email is in the super user list
         if email in super_user_credentials:
-            # Hash the entered password and compare
             hashed_password = hashlib.sha256(password.encode()).hexdigest()
             if super_user_credentials[email] == hashed_password:
                 st.session_state.is_super_admin = True
                 st.success("Logged in as Super Admin!")
-                st.experimental_rerun()
+                # Add a trigger for UI refresh
+                st.session_state.page = "super_admin_dashboard"  # Switch to dashboard
             else:
                 st.error("Invalid password for Super User!")
         else:
@@ -596,77 +594,29 @@ def view_user_activities():
 # Initialise Application
 def main():
     # Initialize session state variables
+    if "page" not in st.session_state:
+        st.session_state.page = "login"  # Default to login page
     if "is_super_admin" not in st.session_state:
         st.session_state.is_super_admin = False
-    if "google_credentials" not in st.session_state:
-        st.session_state.google_credentials = None
-    if "connected_accounts" not in st.session_state:
-        st.session_state.connected_accounts = {}
-    if "organisations" not in st.session_state:
-        st.session_state.organisations = {}
-    if "error_logs" not in st.session_state:
-        st.session_state.error_logs = []
-    if "user_activities" not in st.session_state:
-        st.session_state.user_activities = []
-    if "selected_account" not in st.session_state:
-        st.session_state.selected_account = None
-    if "organisation_id" not in st.session_state:
-        st.session_state.organisation_id = None
-    if "user_organisation_limits" not in st.session_state:
-        st.session_state.user_organisation_limits = {}
-    if "bank_data" not in st.session_state:
-        st.session_state.bank_data = {}
-    if "invitations" not in st.session_state:
-        st.session_state.invitations = {}
 
-    st.sidebar.title("Navigation")
-
-    # Check if the user is logged in as a super admin
-    if not st.session_state.is_super_admin:
-        # Display login options
+    if st.session_state.page == "login":
         login_option = st.sidebar.radio("Choose Login Type", ["User Login", "Super Admin Login"])
+        
+        if login_option == "Super Admin Login":
+            super_user_login()
+        elif login_option == "User Login":
+            google_login()
 
-        if login_option == "User Login":
-            google_login()  # Regular user Google login
-        elif login_option == "Super Admin Login":
-            super_user_login()  # Super admin login
-    else:
-        # Super Admin Dashboard
+    elif st.session_state.page == "super_admin_dashboard" and st.session_state.is_super_admin:
         st.sidebar.title("Super Admin Controls")
         if st.sidebar.button("View Organizations"):
             super_admin_organisation_management()
         if st.sidebar.button("Generate Invitations"):
             generate_invitation_link()
-        if st.sidebar.button("Adjust User Limits"):
-            super_admin_adjust_user_limits()
-        if st.sidebar.button("View Error Logs"):
-            view_error_logs()
-        if st.sidebar.button("View User Activities"):
-            view_user_activities()
-        if st.sidebar.button("Logout Super Admin"):
-            st.session_state.is_super_admin = False
-            st.success("Logged out as Super Admin!")
-            st.experimental_rerun()
-
-    # Regular user dashboard (if logged in with Google)
-    if st.session_state.google_credentials:
-        st.sidebar.title("User Controls")
-        if st.sidebar.button("Manage Organization"):
-            user_dashboard()
-        if st.sidebar.button("Upload Bank Statement"):
-            upload_bank_statement_ui()
-        if st.sidebar.button("Manage Subscriptions"):
-            manage_subscriptions_ui()
         if st.sidebar.button("Logout"):
-            st.session_state.google_credentials = None
-            st.session_state.selected_account = None
+            st.session_state.is_super_admin = False
+            st.session_state.page = "login"  # Return to login page
             st.success("Logged out successfully!")
-            st.experimental_rerun()
-
-    # Fallback if neither super admin nor user logged in
-    if not st.session_state.is_super_admin and not st.session_state.google_credentials:
-        st.title("Welcome to the Organization and Subscription Management App")
-        st.write("Please log in as a user or super admin to continue.")
 
 
 
