@@ -44,14 +44,14 @@ CLIENT_CONFIG = {
 
 def authorize_gmail_api():
     """
-    Handles Google OAuth by displaying a manual authorization URL.
+    Handles Google OAuth process with a specified redirect_uri.
     """
     from google_auth_oauthlib.flow import InstalledAppFlow
     from google.oauth2.credentials import Credentials
 
     SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
 
-    # Get client config from `st.secrets`
+    # Get client configuration from secrets
     client_config = {
         "web": {
             "client_id": st.secrets["GMAIL_API_CREDENTIALS"]["CLIENT_ID"],
@@ -64,28 +64,23 @@ def authorize_gmail_api():
 
     creds = None
 
-    if "google_credentials" in st.session_state and st.session_state.google_credentials:
-        return st.session_state.google_credentials
-
-    flow = InstalledAppFlow.from_client_config(client_config, SCOPES)
-    auth_url, _ = flow.authorization_url(prompt="consent")
-
-    # Display the authorization URL for the user
-    st.write("### Google Login")
-    st.markdown(f"[Click here to authorize]({auth_url})", unsafe_allow_html=True)
-
-    # Get the authorization code from the user
-    auth_code = st.text_input("Enter the authorization code here:")
-    if auth_code:
-        try:
-            flow.fetch_token(code=auth_code)
-            creds = flow.credentials
-            st.session_state.google_credentials = creds
-            st.success("Authorization successful!")
+    if os.path.exists("token.json"):
+        creds = Credentials.from_authorized_user_file("token.json", SCOPES)
+        if creds and creds.valid:
             return creds
-        except Exception as e:
-            st.error(f"Failed to fetch token: {e}")
-            return None
+
+    # Initialize OAuth flow
+    flow = InstalledAppFlow.from_client_config(client_config, SCOPES)
+    flow.redirect_uri = st.secrets["GMAIL_API_CREDENTIALS"]["REDIRECT_URI"]
+
+    # Use console or local server flow
+    creds = flow.run_local_server(port=0)
+
+    # Save credentials for reuse
+    with open("token.json", "w") as token_file:
+        token_file.write(creds.to_json())
+
+    return creds
 
 
 
