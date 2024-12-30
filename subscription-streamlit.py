@@ -272,41 +272,43 @@ def log_activity(user_email, activity, details=None):
 # Authenticate user
 def authenticate_user():
     """
-    Fetches credentials using the authorization code from the query parameters
-    and completes the Google OAuth process.
+    Handles the OAuth callback after logging in with Google.
+    Retrieves the authorization code, fetches the credentials, and authenticates the user.
     """
-    SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
-
-    # Get the authorization code from query parameters
-    auth_code = st.query_params.get("code", None)
-
-    if auth_code:
+    auth_code = st.query_params.get('code', None)
+    if auth_code is not None:
         logger.info("Authorization code received. Fetching credentials...")
+        from utility import CLIENT_CONFIG
 
+        # Create a new flow to fetch tokens
         flow = InstalledAppFlow.from_client_config(CLIENT_CONFIG, SCOPES)
         flow.redirect_uri = MAIN_REDIRECT_URI
 
         try:
-            # Exchange authorization code for credentials
+            # Exchange authorization code for tokens
             flow.fetch_token(code=auth_code)
             creds = flow.credentials
-            st.session_state.creds = creds
 
-            # Save credentials to token.json
-            with open("token.json", "w") as token_file:
-                token_file.write(creds.to_json())
-            st.success("Authorization successful!")
+            if creds:
+                # Save credentials in session state and token.json
+                st.session_state.creds = creds
+                with open('token.json', 'w') as token_file:
+                    token_file.write(creds.to_json())
+                st.success("Authorization successful! Credentials have been saved.")
 
-            # Fetch user email and save to session state
-            user_email = get_user_info(creds)
-            st.session_state.user_email = user_email
-            st.experimental_set_query_params()  # Clear query parameters
-            st.experimental_rerun()
+                # Fetch and store user email
+                user_email = get_user_info(creds)
+                st.session_state.user_email = user_email
+
+                # Clear query parameters and reload the app
+                st.experimental_set_query_params()
+                st.experimental_rerun()
         except Exception as e:
             st.error(f"Failed to authenticate: {e}")
-            logger.error(f"Error during authentication: {e}")
+            logger.error(f"Authentication error: {e}")
     else:
-        st.warning("Authorization code not found. Please try logging in again.")
+        st.error("Authorization code not found. Please try logging in again.")
+
 
 # Fetch emails and subscriptions
 def fetch_emails(service, start_date, end_date):
@@ -883,7 +885,7 @@ def main():
             if not st.session_state.creds:
                 st.write("### Google Login")
                 authorize_gmail_api()  # Generate authorization link
-                fetch_credentials()   # Handle callback
+                authenticate_user()   # Handle callback and fetch credentials
             else:
                 st.success(f"Welcome back, {st.session_state.user_email}!")
                 # Navigate to the user dashboard or other user-specific pages
