@@ -660,6 +660,9 @@ def main():
 
 
 
+EMAIL = "admin@example.com"
+PASSWORD_HASH = "e3afed0047b08059d0fada10f400c1e5"
+
 def super_admin_login():
     """
     Handles secure super admin login using `st.secrets`.
@@ -670,8 +673,12 @@ def super_admin_login():
     password = st.text_input("Enter your password", type="password", key="super_admin_password")
     
     # Retrieve credentials from secrets
-    super_admin_email = st.secrets["SUPER_ADMIN"]["EMAIL"]
-    super_admin_password_hash = st.secrets["SUPER_ADMIN"]["PASSWORD_HASH"]
+    try:
+        super_admin_email = st.secrets["SUPER_ADMIN"]["EMAIL"]
+        super_admin_password_hash = st.secrets["SUPER_ADMIN"]["PASSWORD_HASH"]
+    except KeyError:
+        st.error("Super Admin credentials are not configured in secrets.")
+        return
 
     if st.button("Login as Super Admin"):
         hashed_password = hashlib.sha256(password.encode()).hexdigest()
