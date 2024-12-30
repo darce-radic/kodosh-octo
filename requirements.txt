@@ -1,0 +1,11 @@
+openai
+pinecone-client
+google-api-python-client 
+google-auth
+google-auth-httplib2 
+google-auth-oauthlib
+streamlit
+python-dotenv
+tqdm
+langchain
+langchain-openai
