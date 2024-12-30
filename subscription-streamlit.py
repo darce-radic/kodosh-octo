@@ -38,6 +38,37 @@ CLIENT_CONFIG = {
     }
 }
 
+def detect_subscriptions(df, date_format="%d/%m/%Y"):
+    """
+    Detect potential subscriptions based on recurring charges from the same merchant
+    across multiple months.
+    """
+    try:
+        # Standardize the Date column
+        df["Date"] = pd.to_datetime(df["Date"], format=date_format, errors="coerce")
+        df = df.dropna(subset=["Date"])  # Remove rows with invalid dates
+
+        # Extract Month-Year for grouping
+        df["Month"] = df["Date"].dt.to_period("M")
+
+        # Group by Description and Amount
+        subscriptions = []
+        grouped = df.groupby(["Description", "Amount"])
+        for (description, amount), group in grouped:
+            unique_months = group["Month"].nunique()
+            if unique_months > 2:  # Subscription-like pattern
+                subscriptions.append({
+                    "Merchant": description,
+                    "Amount": amount,
+                    "Occurrences": unique_months,
+                    "First Charge": group["Date"].min().strftime("%Y-%m-%d"),
+                    "Last Charge": group["Date"].max().strftime("%Y-%m-%d")
+                })
+
+        return pd.DataFrame(subscriptions)
+
+    except Exception as e:
+        raise ValueError(f"Error during subscription detection: {e}")
 
 
 
@@ -249,11 +280,10 @@ if st.session_state.is_super_admin:
 
 
 
-
 def upload_and_process_bank_statement(org_id):
     """
     Upload and process a CSV file for bank account data.
-    Identifies potential subscriptions based on repeated monthly charges.
+    Identifies potential subscriptions based on recurring charges.
     """
     st.title("Upload Bank Statement")
 
@@ -271,39 +301,19 @@ def upload_and_process_bank_statement(org_id):
                 st.error(f"Missing required columns: {', '.join(missing_columns)}")
                 return
 
-            # Convert Date column to datetime
-            df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
-            if df["Date"].isna().any():
-                st.error("Invalid date format detected. Please ensure all dates are valid.")
-                return
-
-            # Extract month and year from the Date column
-            df["Month"] = df["Date"].dt.to_period("M")
-
-            # Group by merchant and amount, check for repeated charges across months
-            subscriptions = []
-            grouped = df.groupby(["Description", "Amount"])
-            for (description, amount), group in grouped:
-                unique_months = group["Month"].nunique()
-                if unique_months > 2:  # Subscription-like pattern: appears in at least 3 months
-                    subscriptions.append({
-                        "Merchant": description,
-                        "Amount": amount,
-                        "Occurrences": unique_months,
-                        "First Charge": group["Date"].min().strftime("%Y-%m-%d"),
-                        "Last Charge": group["Date"].max().strftime("%Y-%m-%d")
-                    })
+            # Detect subscriptions
+            subscriptions = detect_subscriptions(df, date_format="%d/%m/%Y")
 
             # Save processed subscriptions to session state
             if org_id not in st.session_state.bank_data:
                 st.session_state.bank_data[org_id] = []
-            st.session_state.bank_data[org_id].extend(subscriptions)
+            st.session_state.bank_data[org_id].extend(subscriptions.to_dict(orient="records"))
 
             # Display results
             st.success(f"Identified {len(subscriptions)} potential subscriptions!")
-            if subscriptions:
+            if not subscriptions.empty:
                 st.write("### Identified Subscriptions")
-                st.dataframe(pd.DataFrame(subscriptions))
+                st.dataframe(subscriptions)
 
         except Exception as e:
             st.error(f"An error occurred while processing the file: {e}")
@@ -416,22 +426,40 @@ def generate_invitation_link(org_id):
 
 
 def google_login():
-    st.title("Login with Google")
-    
-    if st.session_state.google_credentials:
-        email = get_user_info(st.session_state.google_credentials)
-        st.success(f"Connected as {email}")
-    else:
+    """
+    Handles Google OAuth for connecting Gmail.
+    """
+    SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
+
+    # Client secrets from `st.secrets`
+    client_config = {
+        "web": {
+            "client_id": st.secrets["GMAIL_API_CREDENTIALS"]["CLIENT_ID"],
+            "client_secret": st.secrets["GMAIL_API_CREDENTIALS"]["CLIENT_SECRET"],
+            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+            "token_uri": "https://oauth2.googleapis.com/token",
+            "redirect_uris": [st.secrets["GMAIL_API_CREDENTIALS"]["REDIRECT_URI"]]
+        }
+    }
+
+    flow = InstalledAppFlow.from_client_config(client_config, SCOPES)
+
+    # Generate and display the authorization URL
+    auth_url, _ = flow.authorization_url(prompt="consent")
+    st.write("### Connect Gmail")
+    st.markdown(f"[Click here to authorize]({auth_url})", unsafe_allow_html=True)
+
+    # Input for the authorization code
+    auth_code = st.text_input("Enter the authorization code here:")
+    if auth_code:
         try:
-            creds = authorize_gmail_api()
-            if creds:
-                st.session_state.google_credentials = creds
-                email = get_user_info(creds)
-                st.success(f"Successfully connected to Google as {email}")
-            else:
-                st.error("Google login failed. Please try again.")
+            flow.fetch_token(code=auth_code)
+            creds = flow.credentials
+            st.session_state.google_credentials = creds
+            st.success("Gmail account connected successfully!")
         except Exception as e:
-            st.error(f"An error occurred during Google login: {str(e)}")
+            st.error(f"Failed to connect Gmail: {e}")
+
 
 
 
@@ -636,44 +664,67 @@ def delete_organization(org_id):
 
 def super_admin_dashboard():
     """
-    Super Admin Dashboard with functionalities to create organizations,
-    invite users, connect Gmail accounts, and upload/view bank data.
+    Super Admin Dashboard with functionalities to manage organizations,
+    invite users, upload and view bank data, and connect Gmail accounts for email scanning.
     """
     st.title("Super Admin Dashboard")
 
-    # Tabs for different functionalities
-    tabs = st.tabs(["Manage Organizations", "Invite Users", "Upload Bank Data", "View Subscriptions"])
+    # Tabs for managing functionalities
+    tabs = st.tabs([
+        "Manage Organizations",
+        "Invite Users",
+        "Upload Bank Data",
+        "View Subscriptions",
+        "Connect Gmail"
+    ])
 
     # Tab 1: Manage Organizations
     with tabs[0]:
         st.header("Manage Organizations")
-        org_name = st.text_input("Organization Name")
-        org_description = st.text_area("Organization Description")
-        if st.button("Create Organization"):
+        org_name = st.text_input("Organization Name", key="org_name")
+        org_description = st.text_area("Organization Description", key="org_description")
+
+        if st.button("Create Organization", key="create_org_button"):
             create_organization(org_name, org_description)
+
+        # Display existing organizations
+        st.write("### Existing Organizations")
+        for org_id, org_data in st.session_state.organisations.items():
+            st.write(f"**{org_data['name']}** - {org_data['description']}")
+            if st.button(f"Delete {org_data['name']}", key=f"delete_{org_id}"):
+                delete_organization(org_id)
 
     # Tab 2: Invite Users
     with tabs[1]:
         st.header("Invite Users")
-        org_id = st.selectbox("Select Organization", list(st.session_state.organisations.keys()))
+        org_id = st.selectbox("Select Organization", list(st.session_state.organisations.keys()), key="invite_org_id")
         if org_id:
-            if st.button("Generate Invite Link"):
+            if st.button("Generate Invite Link", key="generate_invite_link"):
                 invite_link = generate_invitation_link(org_id)
                 st.success(f"Invite link: {invite_link}")
 
     # Tab 3: Upload Bank Data
     with tabs[2]:
         st.header("Upload Bank Statement")
-        org_id = st.selectbox("Select Organization for Upload", list(st.session_state.organisations.keys()))
+        org_id = st.selectbox("Select Organization for Upload", list(st.session_state.organisations.keys()), key="upload_org_id")
         if org_id:
             upload_and_process_bank_statement(org_id)
 
     # Tab 4: View Subscriptions
     with tabs[3]:
         st.header("View Subscriptions")
-        org_id = st.selectbox("Select Organization to View Subscriptions", list(st.session_state.organisations.keys()))
+        org_id = st.selectbox("Select Organization to View Subscriptions", list(st.session_state.organisations.keys()), key="view_org_id")
         if org_id:
             view_identified_subscriptions(org_id)
+
+    # Tab 5: Connect Gmail
+    with tabs[4]:
+        st.header("Connect Gmail Account for Email Scanning")
+        org_id = st.selectbox("Select Organization to Connect Gmail", list(st.session_state.organisations.keys()), key="gmail_org_id")
+        if org_id:
+            google_login()
+
+
 
 def view_identified_subscriptions(org_id):
     """
@@ -686,9 +737,10 @@ def view_identified_subscriptions(org_id):
         return
 
     subscriptions = st.session_state.bank_data[org_id]
-    st.write(f"### Subscriptions for Organization ID: {org_id}")
     df = pd.DataFrame(subscriptions)
+    st.write(f"### Subscriptions for Organization ID: {org_id}")
     st.dataframe(df)
+
 
 
 def main():
