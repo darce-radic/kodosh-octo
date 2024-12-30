@@ -661,7 +661,7 @@ def main():
 
 
 EMAIL = "admin@example.com"
-PASSWORD_HASH = "e3afed0047b08059d0fada10f400c1e5"
+PASSWORD_HASH = "34819d7beeabb9260a5c854bc85b3e44"
 
 def super_admin_login():
     """
