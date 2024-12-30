@@ -674,8 +674,8 @@ def super_admin_login():
     
     # Retrieve credentials from secrets
     try:
-        super_admin_email = st.secrets["SUPER_ADMIN"]["EMAIL"]
-        super_admin_password_hash = st.secrets["SUPER_ADMIN"]["PASSWORD_HASH"]
+        super_admin_email = EMAIL
+        super_admin_password_hash = PASSWORD_HASH
     except KeyError:
         st.error("Super Admin credentials are not configured in secrets.")
         return
