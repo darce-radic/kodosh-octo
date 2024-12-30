@@ -269,15 +269,12 @@ def log_activity(user_email, activity, details=None):
     with open("activity_log.txt", "a") as activity_file:
         activity_file.write(json.dumps(activity_entry) + "\\n")
 
-# Authenticate user
 def authenticate_user():
     """
-    Handles the OAuth callback after logging in with Google.
-    Retrieves the authorization code, fetches the credentials, and authenticates the user.
+    Handles OAuth callback and fetches credentials after Google login.
     """
     auth_code = st.query_params.get('code', None)
     if auth_code is not None:
-        logger.info("Authorization code received. Fetching credentials...")
         from utility import CLIENT_CONFIG
 
         # Create a new flow to fetch tokens
@@ -285,29 +282,28 @@ def authenticate_user():
         flow.redirect_uri = MAIN_REDIRECT_URI
 
         try:
-            # Exchange authorization code for tokens
             flow.fetch_token(code=auth_code)
             creds = flow.credentials
 
             if creds:
-                # Save credentials in session state and token.json
+                # Store credentials in session state and token.json
                 st.session_state.creds = creds
                 with open('token.json', 'w') as token_file:
                     token_file.write(creds.to_json())
-                st.success("Authorization successful! Credentials have been saved.")
+                st.success("Successfully authenticated!")
 
-                # Fetch and store user email
+                # Get and store user email
                 user_email = get_user_info(creds)
                 st.session_state.user_email = user_email
 
-                # Clear query parameters and reload the app
+                # Clear query parameters and reload
                 st.experimental_set_query_params()
                 st.experimental_rerun()
         except Exception as e:
-            st.error(f"Failed to authenticate: {e}")
-            logger.error(f"Authentication error: {e}")
+            st.error(f"Authentication failed: {e}")
     else:
-        st.error("Authorization code not found. Please try logging in again.")
+        st.warning("Authorization code not found. Please ensure you authorized the application.")
+
 
 
 # Fetch emails and subscriptions
