@@ -47,42 +47,24 @@ def authorize_gmail_api():
     Handles the Google OAuth process for Gmail access.
     """
     creds = None
-    # Check if token.json exists to reuse credentials
+    # Define the Google OAuth scope
+    SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
+
+    # Check if token.json exists
     if os.path.exists("token.json"):
         creds = Credentials.from_authorized_user_file("token.json", SCOPES)
         if creds and creds.valid:
-            st.success("Already logged in.")
             return creds
 
-    # No valid credentials, start OAuth flow
-    flow = InstalledAppFlow.from_client_config(CLIENT_CONFIG, SCOPES)
-    flow.redirect_uri = MAIN_REDIRECT_URI
-
-    # Generate the authorization URL
-    auth_url, _ = flow.authorization_url(
-        access_type="offline",
-        include_granted_scopes="true",
-        prompt="consent"
-    )
-
-    st.markdown(f"[Click here to authorize with Google]({auth_url})", unsafe_allow_html=True)
-
-    # Handle the authorization code input
-    auth_code = st.text_input("Enter the authorization code here:")
-    if auth_code:
-        flow.fetch_token(code=auth_code)
-        creds = flow.credentials
-        if creds:
-            # Save credentials for future use
-            with open("token.json", "w") as token_file:
-                token_file.write(creds.to_json())
-
-            # Store credentials in session state
-            st.session_state.google_credentials = creds
-            st.success("Authorization successful!")
-            return creds
-        else:
-            st.error("Authorization failed. Please try again.")
+    # No valid credentials, initiate the OAuth flow
+    flow = InstalledAppFlow.from_client_secrets_file("client_secret.json", SCOPES)
+    creds = flow.run_local_server(port=0)
+    if creds:
+        # Save credentials to token.json
+        with open("token.json", "w") as token_file:
+            token_file.write(creds.to_json())
+        return creds
+    return None
 
 # Initialize Pinecone
 PINECONE_API_KEY = st.secrets["PINECONE_API_KEY"]
@@ -121,14 +103,15 @@ if "page" not in st.session_state:
 
 
 def get_user_info(creds):
-    """Retrieve user email using OAuth2 credentials."""
+    """
+    Fetch user information using Google OAuth credentials.
+    """
     try:
-        oauth2_service = build('oauth2', 'v2', credentials=creds)
-        user_info = oauth2_service.userinfo().get().execute()
-        return user_info.get('email')
+        service = build('oauth2', 'v2', credentials=creds)
+        user_info = service.userinfo().get().execute()
+        return user_info.get("email")
     except Exception as e:
-        log_error(f"Error fetching user info: {e}")
-        st.error("Failed to fetch user info. Please re-authenticate.")
+        st.error("Failed to fetch user info. Please try logging in again.")
         return None
 
 # Error logging
@@ -330,7 +313,9 @@ def correlate_email_and_bank_data(email_data, bank_data):
 
 
 def super_user_login():
-    st.title("Super User Login")
+    st.title("Super Admin Login")
+
+    # Input fields for login
     email = st.text_input("Enter your email")
     password = st.text_input("Enter your password", type="password", help="Super admin credentials")
 
@@ -344,8 +329,8 @@ def super_user_login():
             hashed_password = hashlib.sha256(password.encode()).hexdigest()
             if super_user_credentials[email] == hashed_password:
                 st.session_state.is_super_admin = True
-                st.session_state.page = "super_admin_dashboard"
                 st.success("Logged in as Super Admin!")
+                st.session_state.page = "super_admin_dashboard"
             else:
                 st.error("Invalid password!")
         else:
@@ -383,21 +368,19 @@ def handle_invitation():
 
 
 def google_login():
-    st.title("Connect to Google for Email Processing")
-    
-    # Check if credentials exist in session state
+    st.title("Login with Google")
     if st.session_state.google_credentials:
         email = get_user_info(st.session_state.google_credentials)
-        st.success(f"Connected as {email}")
+        if email:
+            st.success(f"Connected as {email}")
     else:
-        # Prompt user to authenticate with Google
         creds = authorize_gmail_api()
         if creds:
             st.session_state.google_credentials = creds
             email = get_user_info(creds)
             st.success(f"Successfully connected to Google as {email}")
         else:
-            st.error("Failed to authenticate with Google. Please try again.")
+            st.error("Google login failed. Please try again.")
 
 
 
@@ -571,15 +554,38 @@ def view_user_activities():
         st.write("No user activities logged yet.")
 
 def main():
-    # Navigation
+    # Initialize session state variables
+    if "google_credentials" not in st.session_state:
+        st.session_state.google_credentials = None
+    if "is_super_admin" not in st.session_state:
+        st.session_state.is_super_admin = False
+    if "page" not in st.session_state:
+        st.session_state.page = "login"
+
+    # Navigation based on login state
     if st.session_state.page == "login":
-        st.sidebar.radio("Login", ["User Login", "Super Admin Login"], on_change=lambda: super_user_login() if st.sidebar.radio_value == "Super Admin Login" else google_login())
+        st.sidebar.title("Login")
+        login_option = st.sidebar.radio("Choose Login Type", ["User Login", "Super Admin Login"])
+
+        if login_option == "User Login":
+            google_login()
+        elif login_option == "Super Admin Login":
+            super_user_login()
+
     elif st.session_state.page == "super_admin_dashboard" and st.session_state.is_super_admin:
-        st.sidebar.button("Invite Users", on_click=lambda: generate_invitation_link())
-        st.sidebar.button("Create Organization", on_click=create_organisation)
-    elif st.session_state.page == "user_dashboard":
-        create_organisation()
-        upload_and_process_bank_statement(st.session_state.organisation_id)
+        st.sidebar.title("Super Admin Controls")
+        st.write("Super Admin Dashboard")
+        # Add super admin functionality here
+
+    elif st.session_state.page == "user_dashboard" and st.session_state.google_credentials:
+        st.sidebar.title("User Controls")
+        st.write("User Dashboard")
+        # Add user functionality here
+
+    else:
+        st.title("Welcome to the App")
+        st.write("Please log in to continue.")
+
 
 
 
