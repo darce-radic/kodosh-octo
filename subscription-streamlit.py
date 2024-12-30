@@ -15,6 +15,7 @@ import datetime
 from dotenv import load_dotenv
 import uuid
 import base64
+import hashlib
 
 # Load environment variables
 load_dotenv()
@@ -36,6 +37,10 @@ CLIENT_CONFIG = {
         "javascript_origins": ["https://kodosh.streamlit.app"]
     }
 }
+
+
+
+
 
 def authorize_gmail_api():
     """
@@ -322,20 +327,34 @@ def correlate_email_and_bank_data(email_data, bank_data):
         st.error("Failed to correlate email and bank data. Please try again.")
         return []
 
+
 def super_user_login():
     st.title("Super User Login")
+    
+    # Input fields for email and password
     email = st.text_input("Enter your email")
     password = st.text_input("Enter your password", type="password")
     
-    # Replace this with a proper authentication system
-    super_user_emails = ["admin@example.com"]  # List of super admin emails
+    # Securely store super admin credentials (replace with a secure method)
+    # Use hashed passwords to compare
+    super_user_credentials = {
+        "darko.radiceski@gmail.com": hashlib.sha256("Myfittech1!!!!".encode()).hexdigest()
+    }
+
     if st.button("Login"):
-        if email in super_user_emails and password == "superpassword":  # Replace with secure password handling
-            st.session_state.is_super_admin = True
-            st.success("Logged in as Super Admin!")
-            st.experimental_rerun()
+        # Check if email is in the super user list
+        if email in super_user_credentials:
+            # Hash the entered password and compare
+            hashed_password = hashlib.sha256(password.encode()).hexdigest()
+            if super_user_credentials[email] == hashed_password:
+                st.session_state.is_super_admin = True
+                st.success("Logged in as Super Admin!")
+                st.experimental_rerun()
+            else:
+                st.error("Invalid password for Super User!")
         else:
-            st.error("Invalid credentials for Super User!")
+            st.error("Invalid email for Super User!")
+
 
 def generate_invitation_link():
     if not st.session_state.is_super_admin:
@@ -649,20 +668,6 @@ def main():
         st.title("Welcome to the Organization and Subscription Management App")
         st.write("Please log in as a user or super admin to continue.")
 
-def super_user_login():
-    st.title("Super User Login")
-    email = st.text_input("Enter your email")
-    password = st.text_input("Enter your password", type="password")
-    
-    # Replace this with proper authentication
-    super_user_emails = ["admin@example.com"]  # Example admin email(s)
-    if st.button("Login"):
-        if email in super_user_emails and password == "superpassword":  # Replace with secure password handling
-            st.session_state.is_super_admin = True
-            st.success("Logged in as Super Admin!")
-            st.experimental_rerun()
-        else:
-            st.error("Invalid credentials for Super User!")
 
 
 
