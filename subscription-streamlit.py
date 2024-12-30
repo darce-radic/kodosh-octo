@@ -74,56 +74,72 @@ def detect_subscriptions(df, date_format="%d/%m/%Y"):
 
 def authorize_gmail_api():
     """
-    Handles Gmail API authorization for the user and saves credentials.
+    Handles Gmail API authorization.
     """
+    SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
     creds = None
+
+    # Check for existing credentials
     if os.path.exists("token.json"):
         creds = Credentials.from_authorized_user_file("token.json", SCOPES)
         if creds and creds.valid:
-            st.info("Already logged in")
+            st.success("Already logged in!")
+            st.session_state.creds = creds
+            st.session_state.user_email = get_user_info(creds)
+            st.write("Debug: Using existing token.")
             return creds
 
-    # If no valid credentials, initiate the OAuth flow
-    if not creds or not creds.valid:
-        if creds and creds.expired and creds.refresh_token:
-            creds.refresh(Request())
-            st.success("Token refreshed successfully!")
-        else:
-            flow = InstalledAppFlow.from_client_config(
-                CLIENT_CONFIG, SCOPES
-            )
-            flow.redirect_uri = MAIN_REDIRECT_URI
+    # OAuth Flow
+    flow = InstalledAppFlow.from_client_config(
+        CLIENT_CONFIG, SCOPES
+    )
+    flow.redirect_uri = MAIN_REDIRECT_URI
 
-            authorization_url, _ = flow.authorization_url(
-                access_type="offline",
-                include_granted_scopes="true",
-                prompt="consent"
-            )
+    # Generate Authorization URL
+    authorization_url, _ = flow.authorization_url(
+        access_type="offline",
+        include_granted_scopes="true",
+        prompt="consent"
+    )
+    st.write("Debug: Generated authorization URL.")
+    st.write(f"Authorization URL: {authorization_url}")
 
-            # Display custom authorization button
-            st.markdown(
-                f"""
-                <style>
-                .custom-button {{
-                    display: inline-block;
-                    background-color: #4CAF50; /* Green background */
-                    color: white !important;  /* White text */
-                    padding: 10px 24px;
-                    text-align: center;
-                    text-decoration: none;
-                    font-size: 16px;
-                    border-radius: 5px;
-                    margin-top: 5px; /* Reduce space above the button */
-                    margin-bottom: 5px; /* Reduce space below the button */
-                }}
-                .custom-button:hover {{
-                    background-color: #45a049;
-                }}
-                </style>
-                <a href="{authorization_url}" target="_blank" class="custom-button">Authorize with Google</a>
-                """,
-                unsafe_allow_html=True
-            )
+    # Display custom button
+    st.markdown(f'<a href="{authorization_url}" target="_blank">Authorize with Google</a>', unsafe_allow_html=True)
+
+def fetch_credentials():
+    """
+    Fetch credentials after Google OAuth callback.
+    """
+    SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
+
+    query_params = st.query_params
+    auth_code = query_params.get("code", [None])[0]
+    if auth_code:
+        st.write("Debug: Received authorization code.")
+        flow = InstalledAppFlow.from_client_config(
+            CLIENT_CONFIG, SCOPES
+        )
+        flow.redirect_uri = MAIN_REDIRECT_URI
+        try:
+            flow.fetch_token(code=auth_code)
+            creds = flow.credentials
+            st.session_state.creds = creds
+            with open("token.json", "w") as token_file:
+                token_file.write(creds.to_json())
+            st.write("Debug: Token fetched successfully.")
+
+            user_email = get_user_info(creds)
+            st.session_state.user_email = user_email
+            st.experimental_set_query_params()  # Clear query params
+            st.success(f"Logged in as {user_email}")
+            st.experimental_rerun()
+        except Exception as e:
+            st.error(f"Error fetching token: {e}")
+            st.write(f"Debug: Error details: {e}")
+    else:
+        st.error("Authorization code not found in query parameters.")
+        st.write("Debug: Query parameters:", st.query_params)
 
 def fetch_credentials():
     """
