@@ -77,33 +77,57 @@ def detect_subscriptions(df, date_format="%d/%m/%Y"):
 
 def authorize_gmail_api():
     """
-    Handles Gmail API authorization and OAuth flow.
+    Handles Gmail API authorization and generates an authorization URL for the user.
     """
-    SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
     creds = None
+    SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
 
-    # Check for existing credentials
+    # Check for existing credentials in token.json
     if os.path.exists("token.json"):
         creds = Credentials.from_authorized_user_file("token.json", SCOPES)
         if creds and creds.valid:
-            st.success("Already logged in!")
+            st.info("Already logged in!")
             st.session_state.creds = creds
             st.session_state.user_email = get_user_info(creds)
             return creds
 
-    # OAuth Flow
-    flow = InstalledAppFlow.from_client_config(
-        CLIENT_CONFIG, SCOPES
-    )
-    flow.redirect_uri = "https://kodosh.streamlit.app/api/auth/google/callback"  # Ensure this matches exactly
+    # OAuth Flow for new login
+    flow = InstalledAppFlow.from_client_config(CLIENT_CONFIG, SCOPES)
+    flow.redirect_uri = MAIN_REDIRECT_URI
 
-    # Generate Authorization URL
+    # Generate the authorization URL
     authorization_url, _ = flow.authorization_url(
         access_type="offline",
         include_granted_scopes="true",
         prompt="consent"
     )
-    st.markdown(f'<a href="{authorization_url}" target="_blank">Authorize with Google</a>', unsafe_allow_html=True)
+
+    # Display custom button for user authorization
+    st.markdown(
+        f"""
+        <style>
+        .custom-button {{
+            display: inline-block;
+            background-color: #4CAF50;
+            color: white !important;
+            padding: 10px 24px;
+            text-align: center;
+            text-decoration: none;
+            font-size: 16px;
+            border-radius: 5px;
+            margin-top: 5px;
+            margin-bottom: 5px;
+        }}
+        .custom-button:hover {{
+            background-color: #45a049;
+        }}
+        </style>
+        <a href="{authorization_url}" target="_blank" class="custom-button">Authorize with Google</a>
+        """,
+        unsafe_allow_html=True
+    )
+    st.info("After authorizing, return to this page to complete the login.")
+
 
 
 def fetch_credentials():
@@ -247,26 +271,43 @@ def log_activity(user_email, activity, details=None):
 
 # Authenticate user
 def authenticate_user():
-    auth_code = st.query_params.get('code', None)
+    """
+    Fetches credentials using the authorization code from the query parameters
+    and completes the Google OAuth process.
+    """
+    SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
+
+    # Get the authorization code from query parameters
+    auth_code = st.query_params.get("code", None)
+
     if auth_code:
+        logger.info("Authorization code received. Fetching credentials...")
+
+        flow = InstalledAppFlow.from_client_config(CLIENT_CONFIG, SCOPES)
+        flow.redirect_uri = MAIN_REDIRECT_URI
+
         try:
-            flow = InstalledAppFlow.from_client_config(CLIENT_CONFIG, SCOPES)
-            flow.redirect_uri = MAIN_REDIRECT_URI
+            # Exchange authorization code for credentials
             flow.fetch_token(code=auth_code)
             creds = flow.credentials
-            if creds:
-                user_info = get_user_info(creds)
-                email = user_info.get('email')
-                if email not in st.session_state.connected_accounts:
-                    st.session_state.connected_accounts[email] = creds
-                    log_activity(email, "User authenticated")
-                    st.success(f"Successfully connected to {email}")
-                else:
-                    st.warning(f"{email} is already connected.")
-                st.experimental_rerun()
+            st.session_state.creds = creds
+
+            # Save credentials to token.json
+            with open("token.json", "w") as token_file:
+                token_file.write(creds.to_json())
+            st.success("Authorization successful!")
+
+            # Fetch user email and save to session state
+            user_email = get_user_info(creds)
+            st.session_state.user_email = user_email
+            st.experimental_set_query_params()  # Clear query parameters
+            st.experimental_rerun()
         except Exception as e:
-            log_error(f"Error during authentication: {e}")
-            st.error("Authentication failed. Please try again.")
+            st.error(f"Failed to authenticate: {e}")
+            logger.error(f"Error during authentication: {e}")
+    else:
+        st.warning("Authorization code not found. Please try logging in again.")
+
 # Fetch emails and subscriptions
 def fetch_emails(service, start_date, end_date):
     try:
@@ -821,8 +862,6 @@ def view_identified_subscriptions(org_id):
     st.write(f"### Subscriptions for Organization ID: {org_id}")
     st.dataframe(df)
 
-
-
 def main():
     """
     Main function for the application, including user login, Super Admin login,
@@ -835,10 +874,11 @@ def main():
         st.session_state.creds = None
         st.session_state.user_email = None
 
+    # Handle login page
     if st.session_state.page == "login":
         st.title("Login to the Application")
         login_option = st.radio("Login as", ["User", "Super Admin"])
-        
+
         if login_option == "User":
             if not st.session_state.creds:
                 st.write("### Google Login")
@@ -849,21 +889,31 @@ def main():
                 # Navigate to the user dashboard or other user-specific pages
                 st.session_state.page = "user_dashboard"
                 st.experimental_rerun()
+
         elif login_option == "Super Admin":
             super_admin_login()  # Existing Super Admin login functionality
 
+    # Handle Super Admin Dashboard
     elif st.session_state.page == "super_admin_dashboard" and st.session_state.is_super_admin:
-        super_admin_dashboard()  # Existing Super Admin dashboard functionality
+        super_admin_dashboard()
 
+    # Handle User Dashboard
     elif st.session_state.page == "user_dashboard":
-        st.title("User Dashboard")
-        st.write(f"Welcome, {st.session_state.user_email}!")
-        st.write("This is your user dashboard.")
-        # Add any user-specific functionalities here
+        if st.session_state.user_email:
+            st.title("User Dashboard")
+            st.write(f"Welcome, {st.session_state.user_email}!")
+            st.write("This is your user dashboard.")
+            # Add any user-specific functionalities here
+        else:
+            st.error("Session expired. Please log in again.")
+            st.session_state.page = "login"
+            st.experimental_rerun()
 
+    # Default behavior for undefined states
     else:
         st.title("Welcome to the App")
         st.write("Please log in to access the application.")
+
 
 
 
