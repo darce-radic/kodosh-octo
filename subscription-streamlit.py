@@ -30,6 +30,31 @@ index = pc.Index(index_name)
 # Initialize OpenAI
 openai_client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 
+# Super Admin Credentials
+SUPER_ADMIN_EMAIL = "darko.radiceski@gmail.com"
+SUPER_ADMIN_PASSWORD = "Myfittech1!!!!"
+
+# Initialize session state variables
+if "is_super_admin" not in st.session_state:
+    st.session_state.is_super_admin = False  # Default to False or set dynamically
+if "connected_accounts" not in st.session_state:
+    st.session_state.connected_accounts = {}
+if "organisations" not in st.session_state:
+    st.session_state.organisations = {}
+if "error_logs" not in st.session_state:
+    st.session_state.error_logs = []
+if "user_activities" not in st.session_state:
+    st.session_state.user_activities = []
+if "selected_account" not in st.session_state:
+    st.session_state.selected_account = None
+if "organisation_id" not in st.session_state:
+    st.session_state.organisation_id = None
+if "user_organisation_limits" not in st.session_state:
+    st.session_state.user_organisation_limits = {}
+if "bank_data" not in st.session_state:
+    st.session_state.bank_data = {}
+
+
 # Error logging
 def log_error(error_message):
     timestamp = datetime.datetime.now().isoformat()
