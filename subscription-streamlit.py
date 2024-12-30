@@ -423,11 +423,9 @@ def generate_invitation_link(org_id):
 
 
 
-
-
 def google_login():
     """
-    Handles Google OAuth for connecting Gmail, with a specified redirect_uri.
+    Handles Google OAuth with a custom callback path.
     """
     SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
 
@@ -438,22 +436,23 @@ def google_login():
             "client_secret": st.secrets["GMAIL_API_CREDENTIALS"]["CLIENT_SECRET"],
             "auth_uri": "https://accounts.google.com/o/oauth2/auth",
             "token_uri": "https://oauth2.googleapis.com/token",
-            "redirect_uris": [st.secrets["GMAIL_API_CREDENTIALS"]["REDIRECT_URI"]]
+            "redirect_uris": ["https://kodosh.streamlit.app/api/auth/google/callback"]
         }
     }
 
     flow = InstalledAppFlow.from_client_config(client_config, SCOPES)
 
-    # Set the redirect URI explicitly
-    flow.redirect_uri = st.secrets["GMAIL_API_CREDENTIALS"]["REDIRECT_URI"]
+    # Set the custom redirect URI
+    flow.redirect_uri = "https://kodosh.streamlit.app/api/auth/google/callback"
 
     # Generate and display the authorization URL
     auth_url, _ = flow.authorization_url(prompt="consent")
     st.write("### Connect Gmail")
     st.markdown(f"[Click here to authorize]({auth_url})", unsafe_allow_html=True)
 
-    # Input for the authorization code
-    auth_code = st.text_input("Enter the authorization code here:")
+    # Handle the callback
+    query_params = st.experimental_get_query_params()
+    auth_code = query_params.get("code", [None])[0]
     if auth_code:
         try:
             flow.fetch_token(code=auth_code)
@@ -462,8 +461,6 @@ def google_login():
             st.success("Gmail account connected successfully!")
         except Exception as e:
             st.error(f"Failed to connect Gmail: {e}")
-
-
 
 
 
