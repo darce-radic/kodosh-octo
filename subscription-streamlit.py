@@ -470,17 +470,16 @@ def google_login():
     st.markdown(f"[Click here to authorize Gmail access]({auth_url})", unsafe_allow_html=True)
 
     # Handle callback
-    query_params = st.query_params  # Updated to replace deprecated `st.experimental_get_query_params`
-    auth_code = query_params.get("code", [None])[0]
+    query_params = st.query_params
+    auth_code = query_params.get("code", [None])[0]  # Get the 'code' from URL
     if auth_code:
         try:
-            flow.fetch_token(code=auth_code)
+            flow.fetch_token(code=auth_code)  # Exchange the code for tokens
             creds = flow.credentials
-            st.session_state.google_credentials = creds
+            st.session_state.google_credentials = creds  # Save credentials to session state
             st.success("Gmail account connected successfully!")
         except Exception as e:
             st.error(f"Failed to connect Gmail: {e}")
-
 
 
 
