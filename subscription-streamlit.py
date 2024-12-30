@@ -646,6 +646,7 @@ def main():
 
     if st.session_state.page == "login":
         login_option = st.radio("Login as", ["User", "Super Admin"])
+        
         if login_option == "User":
             google_login()
         elif login_option == "Super Admin":
@@ -656,6 +657,30 @@ def main():
     else:
         st.title("Welcome to the App")
         st.write("Please log in to access the application.")
+
+
+
+def super_admin_login():
+    """
+    Handles secure super admin login using `st.secrets`.
+    """
+    st.title("Super Admin Login")
+
+    email = st.text_input("Enter your email", key="super_admin_email")
+    password = st.text_input("Enter your password", type="password", key="super_admin_password")
+    
+    # Retrieve credentials from secrets
+    super_admin_email = st.secrets["SUPER_ADMIN"]["EMAIL"]
+    super_admin_password_hash = st.secrets["SUPER_ADMIN"]["PASSWORD_HASH"]
+
+    if st.button("Login as Super Admin"):
+        hashed_password = hashlib.sha256(password.encode()).hexdigest()
+        if email == super_admin_email and hashed_password == super_admin_password_hash:
+            st.session_state.is_super_admin = True
+            st.session_state.page = "super_admin_dashboard"
+            st.success("Logged in as Super Admin!")
+        else:
+            st.error("Invalid email or password!")
 
 
 
