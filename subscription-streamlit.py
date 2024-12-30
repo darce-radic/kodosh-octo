@@ -427,7 +427,7 @@ def generate_invitation_link(org_id):
 
 def google_login():
     """
-    Handles Google OAuth for connecting Gmail.
+    Handles Google OAuth for connecting Gmail, with a specified redirect_uri.
     """
     SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
 
@@ -444,6 +444,9 @@ def google_login():
 
     flow = InstalledAppFlow.from_client_config(client_config, SCOPES)
 
+    # Set the redirect URI explicitly
+    flow.redirect_uri = st.secrets["GMAIL_API_CREDENTIALS"]["REDIRECT_URI"]
+
     # Generate and display the authorization URL
     auth_url, _ = flow.authorization_url(prompt="consent")
     st.write("### Connect Gmail")
@@ -459,6 +462,7 @@ def google_login():
             st.success("Gmail account connected successfully!")
         except Exception as e:
             st.error(f"Failed to connect Gmail: {e}")
+
 
 
 
