@@ -444,10 +444,9 @@ def generate_invitation_link(org_id):
 
 
 
-
 def google_login():
     """
-    Handles Google OAuth for Gmail access, supporting headless environments.
+    Handles Google OAuth for Gmail access, using the full path for the redirect_uri.
     """
     SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
 
@@ -458,12 +457,12 @@ def google_login():
             "client_secret": st.secrets["GMAIL_API_CREDENTIALS"]["CLIENT_SECRET"],
             "auth_uri": "https://accounts.google.com/o/oauth2/auth",
             "token_uri": "https://oauth2.googleapis.com/token",
-            "redirect_uris": ["https://kodosh.streamlit.app"]
+            "redirect_uris": ["https://kodosh.streamlit.app/api/auth/google/callback"]
         }
     }
 
     flow = InstalledAppFlow.from_client_config(client_config, SCOPES)
-    flow.redirect_uri = "https://kodosh.streamlit.app"
+    flow.redirect_uri = "https://kodosh.streamlit.app/api/auth/google/callback"
 
     # Authorization URL
     auth_url, _ = flow.authorization_url(prompt="consent")
