@@ -6,6 +6,7 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
+from googleapiclient.discovery import build
 from openai import OpenAI
 from pinecone import Pinecone
 import hashlib
@@ -19,7 +20,64 @@ import base64
 load_dotenv()
 
 # Comprehensive application code integrating all discussed functionalities
+# Define constants
+SCOPES = ["https://www.googleapis.com/auth/gmail.readonly", "https://www.googleapis.com/auth/userinfo.email", "openid"]
+CLIENT_ID = st.secrets["GMAIL_API_CREDENTIALS"]["CLIENT_ID"]
+CLIENT_SECRET = st.secrets["GMAIL_API_CREDENTIALS"]["CLIENT_SECRET"]
+MAIN_REDIRECT_URI = "https://kodosh.streamlit.app"
 
+CLIENT_CONFIG = {
+    "web": {
+        "client_id": CLIENT_ID,
+        "client_secret": CLIENT_SECRET,
+        "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+        "token_uri": "https://oauth2.googleapis.com/token",
+        "redirect_uris": [MAIN_REDIRECT_URI],
+        "javascript_origins": ["https://kodosh.streamlit.app"]
+    }
+}
+
+def authorize_gmail_api():
+    """
+    Handles the Google OAuth process for Gmail access.
+    """
+    creds = None
+    # Check if token.json exists to reuse credentials
+    if os.path.exists("token.json"):
+        creds = Credentials.from_authorized_user_file("token.json", SCOPES)
+        if creds and creds.valid:
+            st.success("Already logged in.")
+            return creds
+
+    # No valid credentials, start OAuth flow
+    flow = InstalledAppFlow.from_client_config(CLIENT_CONFIG, SCOPES)
+    flow.redirect_uri = MAIN_REDIRECT_URI
+
+    # Generate the authorization URL
+    auth_url, _ = flow.authorization_url(
+        access_type="offline",
+        include_granted_scopes="true",
+        prompt="consent"
+    )
+
+    st.markdown(f"[Click here to authorize with Google]({auth_url})", unsafe_allow_html=True)
+
+    # Handle the authorization code input
+    auth_code = st.text_input("Enter the authorization code here:")
+    if auth_code:
+        flow.fetch_token(code=auth_code)
+        creds = flow.credentials
+        if creds:
+            # Save credentials for future use
+            with open("token.json", "w") as token_file:
+                token_file.write(creds.to_json())
+
+            # Store credentials in session state
+            st.session_state.google_credentials = creds
+            st.success("Authorization successful!")
+            return creds
+        else:
+            st.error("Authorization failed. Please try again.")
 
 # Initialize Pinecone
 PINECONE_API_KEY = st.secrets["PINECONE_API_KEY"]
@@ -54,7 +112,16 @@ if "user_organisation_limits" not in st.session_state:
 if "bank_data" not in st.session_state:
     st.session_state.bank_data = {}
 
-
+def get_user_info(creds):
+    """Retrieve user email using OAuth2 credentials."""
+    try:
+        oauth2_service = build('oauth2', 'v2', credentials=creds)
+        user_info = oauth2_service.userinfo().get().execute()
+        return user_info.get('email')
+    except Exception as e:
+        log_error(f"Error fetching user info: {e}")
+        st.error("Failed to fetch user info. Please re-authenticate.")
+        return None
 
 # Error logging
 def log_error(error_message):
@@ -255,6 +322,117 @@ def correlate_email_and_bank_data(email_data, bank_data):
         st.error("Failed to correlate email and bank data. Please try again.")
         return []
 
+def super_user_login():
+    st.title("Super User Login")
+    email = st.text_input("Enter your email")
+    password = st.text_input("Enter your password", type="password")
+    
+    # Replace this with a proper authentication system
+    super_user_emails = ["admin@example.com"]  # List of super admin emails
+    if st.button("Login"):
+        if email in super_user_emails and password == "superpassword":  # Replace with secure password handling
+            st.session_state.is_super_admin = True
+            st.success("Logged in as Super Admin!")
+            st.experimental_rerun()
+        else:
+            st.error("Invalid credentials for Super User!")
+
+def generate_invitation_link():
+    if not st.session_state.is_super_admin:
+        st.error("Only super admins can generate invitations!")
+        return
+
+    st.title("Generate Invitation Link")
+    organization_id = st.selectbox("Select Organization", list(st.session_state.organisations.keys()))
+    if st.button("Generate Link"):
+        invite_token = str(uuid.uuid4())
+        base_url = "https://kodosh.streamlit.app"
+        invite_link = f"{base_url}/invite?org_id={organization_id}&token={invite_token}"
+        
+        # Save the invite token and organization mapping
+        if "invitations" not in st.session_state:
+            st.session_state.invitations = {}
+        st.session_state.invitations[invite_token] = organization_id
+        
+        st.success(f"Invitation Link: {invite_link}")
+
+
+def handle_invitation():
+    query_params = st.experimental_get_query_params()
+    org_id = query_params.get("org_id", [None])[0]
+    token = query_params.get("token", [None])[0]
+    
+    if org_id and token and token in st.session_state.invitations:
+        email = st.text_input("Enter your email to join the organization")
+        if st.button("Join"):
+            if org_id in st.session_state.organisations:
+                st.session_state.organisations[org_id]["users"].append(email)
+                del st.session_state.invitations[token]  # Remove used token
+                st.success(f"Successfully joined organization {org_id}!")
+            else:
+                st.error("Invalid organization ID!")
+    else:
+        st.warning("Invalid or expired invitation link!")
+
+def google_login():
+    st.title("Connect to Google for Email Processing")
+    
+    if st.session_state.google_credentials:
+        email = get_user_info(st.session_state.google_credentials)
+        st.success(f"Connected as {email}")
+    else:
+        authorize_gmail_api()  # Ensure `authorize_gmail_api()` is implemented
+
+def user_dashboard():
+    st.title("User Dashboard")
+    if not st.session_state.organisation_id:
+        st.info("You are not part of an organization. Please create or join an organization.")
+        return
+
+    org_id = st.session_state.organisation_id
+    org_data = st.session_state.organisations.get(org_id, {})
+    st.write(f"### Organization: {org_data.get('name', 'Unknown')}")
+    st.write(f"- Namespace: {org_data.get('namespace', 'N/A')}")
+    st.write(f"- Email Accounts with Data: {org_data.get('email_accounts_with_data', 0)}")
+    st.write(f"- Bank Accounts Uploaded: {org_data.get('bank_accounts_uploaded', 0)}")
+
+    st.write("### Manage Users")
+    users = org_data.get("users", [])
+    for user in users:
+        st.write(f"- {user}")
+    if st.button("Invite New User"):
+        invite_link = generate_invitation_link()
+        st.success(f"Invite link generated: {invite_link}")
+
+
+
+def super_admin_organisation_management():
+    st.title("Super Admin Organization Management")
+
+    if "organisations" not in st.session_state or not st.session_state.organisations:
+        st.info("No organizations available to manage.")
+        return
+
+    for org_id, org_data in st.session_state.organisations.items():
+        st.write(f"### Organization: {org_data['name']}")
+        st.write(f"- Namespace: {org_data.get('namespace', 'N/A')}")
+        st.write(f"- Email Accounts with Data: {org_data.get('email_accounts_with_data', 0)}")
+        st.write(f"- Bank Accounts Uploaded: {org_data.get('bank_accounts_uploaded', 0)}")
+        st.write(f"- Users: {', '.join(org_data.get('users', []))}")
+        if st.button(f"Delete Organization {org_data['name']}", key=org_id):
+            delete_organisation(org_id)
+
+def delete_organisation(org_id):
+    try:
+        namespace = st.session_state.organisations[org_id]["namespace"]
+        index.delete(namespace=namespace)  # Assumes Pinecone integration
+        del st.session_state.organisations[org_id]
+        st.success(f"Deleted organization {org_id} and its associated data.")
+    except Exception as e:
+        log_error(f"Error deleting organization {org_id}: {e}")
+        st.error(f"Failed to delete organization {org_id}.")
+
+
 # Display Subscriptions
 def display_subscriptions(subscriptions):
     st.write("## Identified Subscriptions")
@@ -398,26 +576,95 @@ def view_user_activities():
 
 # Initialise Application
 def main():
-    st.title("Organisation and Subscription Management Application")
+    # Initialize session state variables
+    if "is_super_admin" not in st.session_state:
+        st.session_state.is_super_admin = False
+    if "google_credentials" not in st.session_state:
+        st.session_state.google_credentials = None
+    if "connected_accounts" not in st.session_state:
+        st.session_state.connected_accounts = {}
+    if "organisations" not in st.session_state:
+        st.session_state.organisations = {}
+    if "error_logs" not in st.session_state:
+        st.session_state.error_logs = []
+    if "user_activities" not in st.session_state:
+        st.session_state.user_activities = []
+    if "selected_account" not in st.session_state:
+        st.session_state.selected_account = None
+    if "organisation_id" not in st.session_state:
+        st.session_state.organisation_id = None
+    if "user_organisation_limits" not in st.session_state:
+        st.session_state.user_organisation_limits = {}
+    if "bank_data" not in st.session_state:
+        st.session_state.bank_data = {}
+    if "invitations" not in st.session_state:
+        st.session_state.invitations = {}
 
-    if st.session_state.is_super_admin:
+    st.sidebar.title("Navigation")
+
+    # Check if the user is logged in as a super admin
+    if not st.session_state.is_super_admin:
+        # Display login options
+        login_option = st.sidebar.radio("Choose Login Type", ["User Login", "Super Admin Login"])
+
+        if login_option == "User Login":
+            google_login()  # Regular user Google login
+        elif login_option == "Super Admin Login":
+            super_user_login()  # Super admin login
+    else:
+        # Super Admin Dashboard
         st.sidebar.title("Super Admin Controls")
-        if st.sidebar.button("View Organisations"):
+        if st.sidebar.button("View Organizations"):
             super_admin_organisation_management()
+        if st.sidebar.button("Generate Invitations"):
+            generate_invitation_link()
         if st.sidebar.button("Adjust User Limits"):
             super_admin_adjust_user_limits()
         if st.sidebar.button("View Error Logs"):
             view_error_logs()
         if st.sidebar.button("View User Activities"):
             view_user_activities()
-    else:
+        if st.sidebar.button("Logout Super Admin"):
+            st.session_state.is_super_admin = False
+            st.success("Logged out as Super Admin!")
+            st.experimental_rerun()
+
+    # Regular user dashboard (if logged in with Google)
+    if st.session_state.google_credentials:
         st.sidebar.title("User Controls")
-        if st.sidebar.button("Manage Organisation"):
+        if st.sidebar.button("Manage Organization"):
             user_dashboard()
         if st.sidebar.button("Upload Bank Statement"):
             upload_bank_statement_ui()
         if st.sidebar.button("Manage Subscriptions"):
             manage_subscriptions_ui()
+        if st.sidebar.button("Logout"):
+            st.session_state.google_credentials = None
+            st.session_state.selected_account = None
+            st.success("Logged out successfully!")
+            st.experimental_rerun()
+
+    # Fallback if neither super admin nor user logged in
+    if not st.session_state.is_super_admin and not st.session_state.google_credentials:
+        st.title("Welcome to the Organization and Subscription Management App")
+        st.write("Please log in as a user or super admin to continue.")
+
+def super_user_login():
+    st.title("Super User Login")
+    email = st.text_input("Enter your email")
+    password = st.text_input("Enter your password", type="password")
+    
+    # Replace this with proper authentication
+    super_user_emails = ["admin@example.com"]  # Example admin email(s)
+    if st.button("Login"):
+        if email in super_user_emails and password == "superpassword":  # Replace with secure password handling
+            st.session_state.is_super_admin = True
+            st.success("Logged in as Super Admin!")
+            st.experimental_rerun()
+        else:
+            st.error("Invalid credentials for Super User!")
+
+
 
 # Start the application
 if __name__ == "__main__":
