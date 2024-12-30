@@ -44,38 +44,49 @@ CLIENT_CONFIG = {
 
 def authorize_gmail_api():
     """
-    Handles the Google OAuth process for Gmail access using client secrets from `st.secrets`.
+    Handles Google OAuth by displaying a manual authorization URL.
     """
+    from google_auth_oauthlib.flow import InstalledAppFlow
+    from google.oauth2.credentials import Credentials
 
     SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
 
-    # Extract client secrets from `st.secrets`
-    client_secrets = {
+    # Get client config from `st.secrets`
+    client_config = {
         "web": {
             "client_id": st.secrets["GMAIL_API_CREDENTIALS"]["CLIENT_ID"],
             "client_secret": st.secrets["GMAIL_API_CREDENTIALS"]["CLIENT_SECRET"],
             "auth_uri": "https://accounts.google.com/o/oauth2/auth",
             "token_uri": "https://oauth2.googleapis.com/token",
-            "redirect_uris": [st.secrets["GMAIL_API_CREDENTIALS"]["REDIRECT_URI"]]
+            "redirect_uris": [st.secrets["GMAIL_API_CREDENTIALS"]["REDIRECT_URI"]],
         }
     }
 
     creds = None
-    # Check for existing credentials
-    if os.path.exists("token.json"):
-        creds = Credentials.from_authorized_user_file("token.json", SCOPES)
-        if creds and creds.valid:
+
+    if "google_credentials" in st.session_state and st.session_state.google_credentials:
+        return st.session_state.google_credentials
+
+    flow = InstalledAppFlow.from_client_config(client_config, SCOPES)
+    auth_url, _ = flow.authorization_url(prompt="consent")
+
+    # Display the authorization URL for the user
+    st.write("### Google Login")
+    st.markdown(f"[Click here to authorize]({auth_url})", unsafe_allow_html=True)
+
+    # Get the authorization code from the user
+    auth_code = st.text_input("Enter the authorization code here:")
+    if auth_code:
+        try:
+            flow.fetch_token(code=auth_code)
+            creds = flow.credentials
+            st.session_state.google_credentials = creds
+            st.success("Authorization successful!")
             return creds
+        except Exception as e:
+            st.error(f"Failed to fetch token: {e}")
+            return None
 
-    # No valid credentials, initiate OAuth flow
-    flow = InstalledAppFlow.from_client_config(client_secrets, SCOPES)
-    creds = flow.run_local_server(port=0)
-
-    # Save the credentials for future use
-    with open("token.json", "w") as token_file:
-        token_file.write(creds.to_json())
-
-    return creds
 
 
 # Initialize Pinecone
