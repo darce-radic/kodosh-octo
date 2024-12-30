@@ -30,13 +30,16 @@ SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
 MAIN_REDIRECT_URI = "https://kodosh.streamlit.app/api/auth/google/callback"
 CLIENT_CONFIG = {
     "web": {
-        "client_id": st.secrets["GMAIL_API_CREDENTIALS"]["CLIENT_ID"],
-        "client_secret": st.secrets["GMAIL_API_CREDENTIALS"]["CLIENT_SECRET"],
+        "client_id": "161366495022-dovct3o0ofamo5d17q9heva3h54n735n.apps.googleusercontent.com",
+        "client_secret": "your-client-secret",
         "auth_uri": "https://accounts.google.com/o/oauth2/auth",
         "token_uri": "https://oauth2.googleapis.com/token",
-        "redirect_uris": "https://kodosh.streamlit.app/api/auth/google/callback"
+        "redirect_uris": [
+            "https://kodosh.streamlit.app/api/auth/google/callback"
+        ]
     }
 }
+
 
 def detect_subscriptions(df, date_format="%d/%m/%Y"):
     """
@@ -74,7 +77,7 @@ def detect_subscriptions(df, date_format="%d/%m/%Y"):
 
 def authorize_gmail_api():
     """
-    Handles Gmail API authorization.
+    Handles Gmail API authorization and OAuth flow.
     """
     SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
     creds = None
@@ -86,14 +89,13 @@ def authorize_gmail_api():
             st.success("Already logged in!")
             st.session_state.creds = creds
             st.session_state.user_email = get_user_info(creds)
-            st.write("Debug: Using existing token.")
             return creds
 
     # OAuth Flow
     flow = InstalledAppFlow.from_client_config(
         CLIENT_CONFIG, SCOPES
     )
-    flow.redirect_uri = MAIN_REDIRECT_URI
+    flow.redirect_uri = "https://kodosh.streamlit.app/api/auth/google/callback"  # Ensure this matches exactly
 
     # Generate Authorization URL
     authorization_url, _ = flow.authorization_url(
@@ -101,11 +103,8 @@ def authorize_gmail_api():
         include_granted_scopes="true",
         prompt="consent"
     )
-    st.write("Debug: Generated authorization URL.")
-    st.write(f"Authorization URL: {authorization_url}")
-
-    # Display custom button
     st.markdown(f'<a href="{authorization_url}" target="_blank">Authorize with Google</a>', unsafe_allow_html=True)
+
 
 def fetch_credentials():
     """
