@@ -283,20 +283,31 @@ def upload_bank_statement_ui():
 # UI for Managing Subscriptions
 def manage_subscriptions_ui():
     st.write("## Manage Subscriptions")
-    email_data = fetch_emails(build('gmail', 'v1', credentials=st.session_state.connected_accounts[st.session_state.selected_account]), "2023-01-01", "2023-12-31")
-    bank_data = st.session_state.bank_data.get(st.session_state.organisation_id, [])
-    correlated_data = correlate_email_and_bank_data(email_data, bank_data)
-    display_subscriptions(correlated_data)
-# Super Admin Management of Organisations
-def super_admin_organisation_management():
-    st.write("## Organisation Management")
-    for org_id, org_data in st.session_state.organisations.items():
-        st.write(f"### Organisation: {org_data['name']}")
-        st.write(f"- Namespace: {org_data['namespace']}")
-        st.write(f"- Email Accounts with Data: {org_data['email_accounts_with_data']}")
-        st.write(f"- Bank Accounts Uploaded: {org_data['bank_accounts_uploaded']}")
-        if st.button(f"Delete Organisation {org_data['name']}", key=org_id):
-            delete_organisation(org_id)
+    
+    # Ensure selected_account is set and exists in connected_accounts
+    if st.session_state.selected_account is None or st.session_state.selected_account not in st.session_state.connected_accounts:
+        st.error("No account selected or the selected account is not connected. Please connect an account first.")
+        return  # Exit the function if prerequisites are not met
+
+    try:
+        # Build the Gmail service using the selected account credentials
+        gmail_service = build('gmail', 'v1', credentials=st.session_state.connected_accounts[st.session_state.selected_account])
+        
+        # Fetch emails within the specified date range
+        email_data = fetch_emails(gmail_service, "2023-01-01", "2023-12-31")
+        
+        # Retrieve bank data for the active organization
+        bank_data = st.session_state.bank_data.get(st.session_state.organisation_id, [])
+        
+        # Correlate email and bank data
+        correlated_data = correlate_email_and_bank_data(email_data, bank_data)
+        
+        # Display the correlated subscriptions
+        display_subscriptions(correlated_data)
+    except Exception as e:
+        log_error(f"Error in manage_subscriptions_ui: {e}")
+        st.error("An error occurred while managing subscriptions. Please try again.")
+
 
 # Delete Organisation
 def delete_organisation(organisation_id):
