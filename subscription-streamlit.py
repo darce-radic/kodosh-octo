@@ -97,9 +97,11 @@ openai_client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 SUPER_ADMIN_EMAIL = "darko.radiceski@gmail.com"
 SUPER_ADMIN_PASSWORD = "Myfittech1!!!!"
 
-# Initialize session state variables with default values if not already set
+# Initialize session state variables
+if "google_credentials" not in st.session_state:
+    st.session_state.google_credentials = None  # Default to None
 if "is_super_admin" not in st.session_state:
-    st.session_state.is_super_admin = False  # Default to non-admin users
+    st.session_state.is_super_admin = False
 if "connected_accounts" not in st.session_state:
     st.session_state.connected_accounts = {}
 if "organisations" not in st.session_state:
@@ -116,6 +118,11 @@ if "user_organisation_limits" not in st.session_state:
     st.session_state.user_organisation_limits = {}
 if "bank_data" not in st.session_state:
     st.session_state.bank_data = {}
+if "page" not in st.session_state:
+    st.session_state.page = "login"  # Default to login page
+if "invitations" not in st.session_state:
+    st.session_state.invitations = {}
+
 
 def get_user_info(creds):
     """Retrieve user email using OAuth2 credentials."""
@@ -394,32 +401,20 @@ def handle_invitation():
 def google_login():
     st.title("Connect to Google for Email Processing")
     
+    # Check if credentials exist in session state
     if st.session_state.google_credentials:
         email = get_user_info(st.session_state.google_credentials)
         st.success(f"Connected as {email}")
     else:
-        authorize_gmail_api()  # Ensure `authorize_gmail_api()` is implemented
+        # Prompt user to authenticate with Google
+        creds = authorize_gmail_api()
+        if creds:
+            st.session_state.google_credentials = creds
+            email = get_user_info(creds)
+            st.success(f"Successfully connected to Google as {email}")
+        else:
+            st.error("Failed to authenticate with Google. Please try again.")
 
-def user_dashboard():
-    st.title("User Dashboard")
-    if not st.session_state.organisation_id:
-        st.info("You are not part of an organization. Please create or join an organization.")
-        return
-
-    org_id = st.session_state.organisation_id
-    org_data = st.session_state.organisations.get(org_id, {})
-    st.write(f"### Organization: {org_data.get('name', 'Unknown')}")
-    st.write(f"- Namespace: {org_data.get('namespace', 'N/A')}")
-    st.write(f"- Email Accounts with Data: {org_data.get('email_accounts_with_data', 0)}")
-    st.write(f"- Bank Accounts Uploaded: {org_data.get('bank_accounts_uploaded', 0)}")
-
-    st.write("### Manage Users")
-    users = org_data.get("users", [])
-    for user in users:
-        st.write(f"- {user}")
-    if st.button("Invite New User"):
-        invite_link = generate_invitation_link()
-        st.success(f"Invite link generated: {invite_link}")
 
 
 
