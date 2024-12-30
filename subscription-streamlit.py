@@ -280,6 +280,7 @@ if st.session_state.is_super_admin:
 
 
 
+
 def upload_and_process_bank_statement(org_id):
     """
     Upload and process a CSV file for bank account data.
@@ -301,19 +302,39 @@ def upload_and_process_bank_statement(org_id):
                 st.error(f"Missing required columns: {', '.join(missing_columns)}")
                 return
 
-            # Detect subscriptions
-            subscriptions = detect_subscriptions(df, date_format="%d/%m/%Y")
+            # Convert Date column to datetime with `dayfirst=True`
+            df["Date"] = pd.to_datetime(df["Date"], errors="coerce", dayfirst=True)
+            if df["Date"].isna().any():
+                st.error("Invalid date format detected. Please ensure all dates are valid.")
+                return
+
+            # Extract Month-Year for grouping
+            df["Month"] = df["Date"].dt.to_period("M")
+
+            # Group by Description and Amount, check for repeated charges across months
+            subscriptions = []
+            grouped = df.groupby(["Description", "Amount"])
+            for (description, amount), group in grouped:
+                unique_months = group["Month"].nunique()
+                if unique_months > 2:  # Subscription-like pattern: appears in at least 3 months
+                    subscriptions.append({
+                        "Merchant": description,
+                        "Amount": amount,
+                        "Occurrences": unique_months,
+                        "First Charge": group["Date"].min().strftime("%Y-%m-%d"),
+                        "Last Charge": group["Date"].max().strftime("%Y-%m-%d")
+                    })
 
             # Save processed subscriptions to session state
             if org_id not in st.session_state.bank_data:
                 st.session_state.bank_data[org_id] = []
-            st.session_state.bank_data[org_id].extend(subscriptions.to_dict(orient="records"))
+            st.session_state.bank_data[org_id].extend(subscriptions)
 
             # Display results
             st.success(f"Identified {len(subscriptions)} potential subscriptions!")
-            if not subscriptions.empty:
+            if subscriptions:
                 st.write("### Identified Subscriptions")
-                st.dataframe(subscriptions)
+                st.dataframe(pd.DataFrame(subscriptions))
 
         except Exception as e:
             st.error(f"An error occurred while processing the file: {e}")
@@ -423,9 +444,10 @@ def generate_invitation_link(org_id):
 
 
 
+
 def google_login():
     """
-    Handles Google OAuth with a custom callback path.
+    Handles Google OAuth for Gmail access, supporting headless environments.
     """
     SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
 
@@ -436,22 +458,20 @@ def google_login():
             "client_secret": st.secrets["GMAIL_API_CREDENTIALS"]["CLIENT_SECRET"],
             "auth_uri": "https://accounts.google.com/o/oauth2/auth",
             "token_uri": "https://oauth2.googleapis.com/token",
-            "redirect_uris": ["https://kodosh.streamlit.app/api/auth/google/callback"]
+            "redirect_uris": ["https://kodosh.streamlit.app"]
         }
     }
 
     flow = InstalledAppFlow.from_client_config(client_config, SCOPES)
+    flow.redirect_uri = "https://kodosh.streamlit.app"
 
-    # Set the custom redirect URI
-    flow.redirect_uri = "https://kodosh.streamlit.app/api/auth/google/callback"
-
-    # Generate and display the authorization URL
+    # Authorization URL
     auth_url, _ = flow.authorization_url(prompt="consent")
     st.write("### Connect Gmail")
-    st.markdown(f"[Click here to authorize]({auth_url})", unsafe_allow_html=True)
+    st.markdown(f"[Click here to authorize Gmail access]({auth_url})", unsafe_allow_html=True)
 
-    # Handle the callback
-    query_params = st.experimental_get_query_params()
+    # Handle callback
+    query_params = st.query_params  # Updated to replace deprecated `st.experimental_get_query_params`
     auth_code = query_params.get("code", [None])[0]
     if auth_code:
         try:
@@ -769,6 +789,8 @@ PASSWORD_HASH = "34819d7beeabb9260a5c854bc85b3e44"
 
 
 
+import hashlib
+
 def super_admin_login():
     """
     Handles secure super admin login with hardcoded credentials.
@@ -777,7 +799,7 @@ def super_admin_login():
 
     # Hardcoded credentials
     super_admin_email = "admin@example.com"
-    super_admin_password_hash = hashlib.sha256("superpassword".encode()).hexdigest()
+    super_admin_password = "superpassword"
 
     # Input fields for email and password
     email = st.text_input("Enter your email", key="super_admin_email")
@@ -785,13 +807,13 @@ def super_admin_login():
 
     # Compare input with hardcoded credentials
     if st.button("Login as Super Admin"):
-        hashed_password = hashlib.sha256(password.encode()).hexdigest()
-        if email == super_admin_email and hashed_password == super_admin_password_hash:
+        if email == super_admin_email and password == super_admin_password:
             st.session_state.is_super_admin = True
             st.session_state.page = "super_admin_dashboard"
             st.success("Logged in as Super Admin!")
         else:
             st.error("Invalid email or password!")
+
 
 
 
