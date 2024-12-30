@@ -34,9 +34,9 @@ openai_client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 SUPER_ADMIN_EMAIL = "darko.radiceski@gmail.com"
 SUPER_ADMIN_PASSWORD = "Myfittech1!!!!"
 
-# Initialize session state variables
+# Initialize session state variables with default values if not already set
 if "is_super_admin" not in st.session_state:
-    st.session_state.is_super_admin = False  # Default to False or set dynamically
+    st.session_state.is_super_admin = False  # Default to non-admin users
 if "connected_accounts" not in st.session_state:
     st.session_state.connected_accounts = {}
 if "organisations" not in st.session_state:
@@ -53,6 +53,7 @@ if "user_organisation_limits" not in st.session_state:
     st.session_state.user_organisation_limits = {}
 if "bank_data" not in st.session_state:
     st.session_state.bank_data = {}
+
 
 
 # Error logging
